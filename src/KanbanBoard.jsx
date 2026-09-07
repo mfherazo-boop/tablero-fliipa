@@ -365,13 +365,14 @@ export default function KanbanBoard() {
       try {
         const remote = await pullSharedBoard(true);
         if (cancelled) return;
-        const initialTasks = remote.tasks && remote.tasks.length > 0 ? remote.tasks : seedTasks();
+        const hadRemoteTasks = remote.tasks && remote.tasks.length > 0;
+        const initialTasks = hadRemoteTasks ? remote.tasks : seedTasks();
         const initialInits = remote.initiatives || [];
         setDeletedTaskIds(remote.deletedTaskIds);
         setDeletedInitIds(remote.deletedInitIds);
         setTasks(initialTasks.filter((t) => !remote.deletedTaskIds[t.id]));
         setInitiatives(initialInits.filter((i) => !remote.deletedInitIds[i.id]));
-        lastTasksRef.current = JSON.stringify(initialTasks);
+        lastTasksRef.current = hadRemoteTasks ? JSON.stringify(initialTasks) : "";
         lastInitsRef.current = JSON.stringify(initialInits);
         lastDeletedTasksRef.current = JSON.stringify(remote.deletedTaskIds);
         lastDeletedInitsRef.current = JSON.stringify(remote.deletedInitIds);

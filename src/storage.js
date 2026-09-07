@@ -1,72 +1,64 @@
 const API = `${import.meta.env.BASE_URL || "/"}api/board`.replace(/\/{2,}/g, "/");
-const BLOB_API = "https://jsonblob.com/api/jsonBlob";
-const BOARD_QUERY = "board";
-const BOARD_ID_KEY = "fliipa-kanban:board-id";
+const BOX = "https://extendsclass.com/api/json-storage/bin";
+const KV_APP = "x0as3in0";
+const KV_KEY = "fliipa-board";
+const KV = "https://keyvalue.immanuel.co/api/KeyVal";
 
 let cache = {};
 let writeQueue = Promise.resolve();
-let mode = null; // "api" | "blob"
-let boardId = null;
+let mode = null; // "api" | "shared"
 
-function currentUrl() {
-  return new URL(window.location.href);
-}
-
-function readBoardIdFromUrl() {
+function parsePointer(raw) {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
   try {
-    return currentUrl().searchParams.get(BOARD_QUERY);
+    const parsed = JSON.parse(trimmed);
+    return typeof parsed === "string" ? parsed : trimmed.replace(/^"|"$/g, "");
   } catch (e) {
-    return null;
+    return trimmed.replace(/^"|"$/g, "");
   }
-}
-
-function persistBoardId(id) {
-  boardId = id;
-  try {
-    localStorage.setItem(BOARD_ID_KEY, id);
-  } catch (e) {
-    /* ignore */
-  }
-  try {
-    const url = currentUrl();
-    if (url.searchParams.get(BOARD_QUERY) !== id) {
-      url.searchParams.set(BOARD_QUERY, id);
-      window.history.replaceState(null, "", url.toString());
-    }
-  } catch (e) {
-    /* ignore */
-  }
-}
-
-async function readPublishedBoardId() {
-  const base = import.meta.env.BASE_URL || "/";
-  const res = await fetch(`${base}board-id.txt`, { cache: "no-store" });
-  if (!res.ok) return null;
-  const text = (await res.text()).trim();
-  return text && text !== "pending" ? text : null;
 }
 
 async function probeApi() {
   try {
     const res = await fetch(API, { headers: { Accept: "application/json" } });
-    return res.ok;
+    const type = (res.headers.get("content-type") || "").toLowerCase();
+    return res.ok && type.includes("application/json");
   } catch (e) {
     return false;
   }
 }
 
-async function createBlob() {
-  const res = await fetch(BLOB_API, {
+async function readPointer() {
+  const res = await fetch(`${KV}/GetValue/${KV_APP}/${KV_KEY}?t=${Date.now()}`);
+  if (!res.ok) throw new Error("No se pudo ubicar el tablero compartido");
+  return parsePointer(await res.text());
+}
+
+async function writePointer(id) {
+  const res = await fetch(`${KV}/UpdateValue/${KV_APP}/${KV_KEY}/${encodeURIComponent(id)}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: "{}",
   });
-  if (!res.ok) throw new Error("No se pudo crear el tablero compartido");
-  const fromHeader = res.headers.get("x-jsonblob");
-  const location = res.headers.get("location") || "";
-  const id = fromHeader || location.split("/").filter(Boolean).pop();
-  if (!id) throw new Error("No se recibió el id del tablero");
-  return id;
+  if (!res.ok) throw new Error("No se pudo publicar el tablero compartido");
+}
+
+async function readBox(id) {
+  const res = await fetch(`${BOX}/${id}?t=${Date.now()}`, { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error("No se pudo leer el tablero compartido");
+  const data = await res.json();
+  return data && typeof data === "object" ? data : {};
+}
+
+async function writeBox(data) {
+  const res = await fetch(BOX, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("No se pudo guardar el tablero compartido");
+  const out = await res.json();
+  if (!out || !out.id) throw new Error("El guardado no devolvió un id");
+  return out.id;
 }
 
 async function ensureMode() {
@@ -75,18 +67,7 @@ async function ensureMode() {
     mode = "api";
     return mode;
   }
-  const fromUrl = readBoardIdFromUrl();
-  const fromStorage = (() => {
-    try {
-      return localStorage.getItem(BOARD_ID_KEY);
-    } catch (e) {
-      return null;
-    }
-  })();
-  const fromSite = await readPublishedBoardId().catch(() => null);
-  const id = fromUrl || fromStorage || fromSite || (await createBlob());
-  persistBoardId(id);
-  mode = "blob";
+  mode = "shared";
   return mode;
 }
 
@@ -98,10 +79,8 @@ async function fetchBoard() {
     const data = await res.json();
     cache = data && typeof data === "object" ? data : {};
   } else {
-    const res = await fetch(`${BLOB_API}/${boardId}`, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error("No se pudo leer el tablero compartido");
-    const data = await res.json();
-    cache = data && typeof data === "object" ? data : {};
+    const id = await readPointer();
+    cache = id ? await readBox(id) : {};
   }
   try {
     localStorage.setItem("fliipa-kanban:cache", JSON.stringify(cache));
@@ -121,12 +100,8 @@ async function putBoard(data) {
     });
     if (!res.ok) throw new Error("No se pudo guardar el tablero compartido");
   } else {
-    const res = await fetch(`${BLOB_API}/${boardId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error("No se pudo guardar el tablero compartido");
+    const id = await writeBox(data);
+    await writePointer(id);
   }
   cache = data;
   try {
