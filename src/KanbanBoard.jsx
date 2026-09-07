@@ -156,6 +156,115 @@ async function copyPlainText(text) {
   }
 }
 
+const MAX_ATTACHMENTS = 5;
+const MAX_DOC_BYTES = 1.5 * 1024 * 1024;
+const ATTACH_ACCEPT = "image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv";
+
+function isCompressibleImage(type, name) {
+  return /image\/(jpeg|jpg|png|webp|gif|bmp)/i.test(type || "") || /\.(png|jpe?g|gif|webp|bmp)$/i.test(name || "");
+}
+
+function formatBytes(n) {
+  if (!n && n !== 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function canvasToJpeg(img, max, quality) {
+  let w = img.width;
+  let h = img.height;
+  if (w > max || h > max) {
+    const scale = max / Math.max(w, h);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const data = canvasToJpeg(img, 1280, 0.72);
+      const thumb = canvasToJpeg(img, 96, 0.7);
+      URL.revokeObjectURL(url);
+      resolve({
+        name: file.name.replace(/\.[^.]+$/, "") + ".jpg",
+        type: "image/jpeg",
+        size: Math.round((data.length * 3) / 4),
+        isImage: true,
+        data,
+        thumb,
+      });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("No se pudo leer la imagen"));
+    };
+    img.src = url;
+  });
+}
+
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function fileToPending(file) {
+  if (isCompressibleImage(file.type, file.name)) {
+    return compressImage(file);
+  }
+  if (file.size > MAX_DOC_BYTES) {
+    throw new Error(`${file.name} supera 1.5 MB`);
+  }
+  const data = await readAsDataUrl(file);
+  return {
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    isImage: /^image\//.test(file.type || ""),
+    data,
+    thumb: null,
+  };
+}
+
+async function uploadPending(pending) {
+  if (typeof window !== "undefined" && window.storage && typeof window.storage.putFile === "function") {
+    const id = await window.storage.putFile({
+      name: pending.name,
+      type: pending.type,
+      data: pending.data,
+    });
+    return {
+      id,
+      name: pending.name,
+      type: pending.type,
+      size: pending.size,
+      isImage: pending.isImage,
+      thumb: pending.thumb || null,
+    };
+  }
+  return {
+    id: "local-" + Date.now() + Math.random().toString(36).slice(2, 6),
+    name: pending.name,
+    type: pending.type,
+    size: pending.size,
+    isImage: pending.isImage,
+    thumb: pending.thumb || null,
+    data: pending.data,
+  };
+}
+
 function isoDaysAgo(days) {
   return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
 }
@@ -284,6 +393,7 @@ export default function KanbanBoard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState(null);
   const [initiatives, setInitiatives] = useState([]);
   const [deletedTaskIds, setDeletedTaskIds] = useState({});
   const [deletedInitIds, setDeletedInitIds] = useState({});
@@ -925,6 +1035,7 @@ export default function KanbanBoard() {
                           onMoveRight={colIdx < COLUMNS.length - 1 ? () => moveByOffset(task.id, 1) : null}
                           onDelete={() => deleteTask(task.id)}
                           onToggleBlocked={() => toggleBlocked(task.id)}
+                          onOpenAttachment={setPreviewAttachment}
                         />
                       ))}
                     {counts[col.id] === 0 && (
@@ -968,6 +1079,10 @@ export default function KanbanBoard() {
 
       {importOpen && (
         <ImportModal C={C} onClose={() => setImportOpen(false)} onApply={applyImportedSnapshot} />
+      )}
+
+      {previewAttachment && (
+        <AttachmentPreview C={C} attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />
       )}
     </div>
   );
@@ -1651,7 +1766,7 @@ function FilterChip({ C, active, label, onClick, dotColor }) {
   );
 }
 
-function TaskCard({ C, task, dragging, onDragStart, onDragEnd, onMoveLeft, onMoveRight, onDelete, onToggleBlocked }) {
+function TaskCard({ C, task, dragging, onDragStart, onDragEnd, onMoveLeft, onMoveRight, onDelete, onToggleBlocked, onOpenAttachment }) {
   const [hover, setHover] = useState(false);
   const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
   const today = new Date().toISOString().slice(0, 10);
@@ -1720,6 +1835,47 @@ function TaskCard({ C, task, dragging, onDragStart, onDragEnd, onMoveLeft, onMov
           {task.description}
         </div>
       ) : null}
+      {Array.isArray(task.attachments) && task.attachments.length > 0 && (
+        <div
+          style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {task.attachments.map((att) => (
+            <button
+              key={att.id}
+              type="button"
+              draggable={false}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenAttachment && onOpenAttachment(att);
+              }}
+              title={att.name}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                maxWidth: "100%",
+                background: C.surface,
+                border: `1px solid ${C.borderSoft}`,
+                borderRadius: 7,
+                padding: att.isImage && att.thumb ? 2 : "4px 7px",
+                color: C.textMuted,
+                fontSize: 11,
+                cursor: "pointer",
+              }}
+            >
+              {att.isImage && att.thumb ? (
+                <img src={att.thumb} alt={att.name} style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5, display: "block" }} />
+              ) : (
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {att.name}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
@@ -1778,26 +1934,65 @@ function arrowStyle(C) {
 function AddTaskModal({ C, assignees, onClose, onSave }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [pending, setPending] = useState([]);
+  const [attachError, setAttachError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const [type, setType] = useState("Task");
   const [assignee, setAssignee] = useState(assignees[0] || "__none__");
   const [customAssignee, setCustomAssignee] = useState("");
   const [status, setStatus] = useState("backlog");
   const [dueDate, setDueDate] = useState("");
   const [blocked, setBlocked] = useState(false);
+  const fileInputRef = useRef(null);
   const useCustom = assignee === "__custom__";
 
-  function handleSave() {
-    if (!title.trim()) return;
+  async function addFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    if (pending.length + files.length > MAX_ATTACHMENTS) {
+      setAttachError("Puedes adjuntar hasta 5 archivos");
+      return;
+    }
+    setAttachError(null);
+    const next = [];
+    for (const file of files) {
+      try {
+        next.push({
+          ...(await fileToPending(file)),
+          localId: "p" + Date.now() + Math.random().toString(36).slice(2, 6),
+        });
+      } catch (e) {
+        setAttachError(e.message || "No se pudo adjuntar el archivo");
+      }
+    }
+    if (next.length) setPending((prev) => [...prev, ...next].slice(0, MAX_ATTACHMENTS));
+  }
+
+  async function handleSave() {
+    if (!title.trim() || saving) return;
     const finalAssignee = useCustom ? customAssignee.trim() : assignee === "__none__" ? "" : assignee.trim();
-    onSave({
-      title: title.trim(),
-      description: description.trim(),
-      type,
-      assignee: finalAssignee,
-      status,
-      dueDate: dueDate || null,
-      blocked,
-    });
+    setSaving(true);
+    setAttachError(null);
+    try {
+      const attachments = [];
+      for (const item of pending) {
+        attachments.push(await uploadPending(item));
+      }
+      onSave({
+        title: title.trim(),
+        description: description.trim(),
+        attachments,
+        type,
+        assignee: finalAssignee,
+        status,
+        dueDate: dueDate || null,
+        blocked,
+      });
+    } catch (e) {
+      setAttachError("No se pudieron subir los adjuntos. Intenta de nuevo.");
+      setSaving(false);
+    }
   }
 
   const label = labelStyle(C);
@@ -1810,20 +2005,108 @@ function AddTaskModal({ C, assignees, onClose, onSave }) {
       onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(8,10,14,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}
     >
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 380, padding: 20 }}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 440, padding: 20, maxHeight: "90vh", overflowY: "auto" }}
+      >
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 16 }}>Nueva tarea</div>
 
         <label style={label}>Título</label>
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="¿Qué hay que hacer?" style={input} />
 
         <label style={label}>Descripción</label>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={4}
-          placeholder="Detalles, contexto o criterios de la tarea (opcional)"
-          style={{ ...input, resize: "vertical", minHeight: 88 }}
-        />
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDropActive(true);
+          }}
+          onDragLeave={() => setDropActive(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDropActive(false);
+            addFiles(e.dataTransfer.files);
+          }}
+          style={{
+            border: `1px dashed ${dropActive ? C.accent : C.border}`,
+            borderRadius: 8,
+            padding: 8,
+            background: dropActive ? C.surfaceRaised : "transparent",
+          }}
+        >
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            placeholder="Detalles, contexto o criterios de la tarea (opcional). Arrastra aquí imágenes o documentos."
+            style={{ ...input, resize: "vertical", minHeight: 88, margin: 0, border: "none", background: "transparent" }}
+          />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "0 2px 2px" }}>
+            <span style={{ fontSize: 11.5, color: C.textFaint }}>Imágenes o documentos · máx. 1.5 MB · 5 archivos</span>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              style={{
+                background: C.surfaceRaised,
+                border: `1px solid ${C.border}`,
+                color: C.text,
+                borderRadius: 7,
+                padding: "6px 10px",
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Adjuntar
+            </button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ATTACH_ACCEPT}
+            multiple
+            hidden
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          {pending.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+              {pending.map((item) => (
+                <div
+                  key={item.localId}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: C.surfaceRaised,
+                    borderRadius: 8,
+                    padding: "6px 8px",
+                  }}
+                >
+                  {item.isImage && (item.thumb || item.data) ? (
+                    <img src={item.thumb || item.data} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5 }} />
+                  ) : (
+                    <span style={{ fontSize: 16, width: 36, textAlign: "center" }}>📄</span>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                    <div style={{ fontSize: 11, color: C.textFaint }}>{formatBytes(item.size)}</div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Quitar adjunto"
+                    onClick={() => setPending((prev) => prev.filter((p) => p.localId !== item.localId))}
+                    style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer", fontSize: 14 }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {attachError && <div style={{ fontSize: 12.5, color: C.danger, marginTop: 8 }}>{attachError}</div>}
 
         <label style={label}>Tipo</label>
         <select value={type} onChange={(e) => setType(e.target.value)} style={input}>
@@ -1866,13 +2149,70 @@ function AddTaskModal({ C, assignees, onClose, onSave }) {
         </label>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-          <button onClick={onClose} style={ghost}>
+          <button onClick={onClose} style={ghost} disabled={saving}>
             Cancelar
           </button>
-          <button onClick={handleSave} style={primary}>
-            Crear tarea
+          <button onClick={handleSave} style={{ ...primary, opacity: saving ? 0.7 : 1 }} disabled={saving}>
+            {saving ? "Subiendo…" : "Crear tarea"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AttachmentPreview({ C, attachment, onClose }) {
+  const [src, setSrc] = useState(attachment.data || null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (src) return;
+    if (!attachment.id || String(attachment.id).startsWith("local-")) {
+      setError("No se pudo abrir el adjunto");
+      return;
+    }
+    if (!window.storage || typeof window.storage.getFile !== "function") {
+      setError("No se pudo abrir el adjunto");
+      return;
+    }
+    let cancelled = false;
+    window.storage
+      .getFile(attachment.id)
+      .then((file) => {
+        if (cancelled) return;
+        if (file && file.data) setSrc(file.data);
+        else setError("No se encontró el archivo");
+      })
+      .catch(() => {
+        if (!cancelled) setError("No se pudo abrir el adjunto");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment, src]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(8,10,14,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 60 }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 560, padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{attachment.name}</div>
+          <button onClick={onClose} style={ghostBtn(C)}>
+            Cerrar
+          </button>
+        </div>
+        {error && <div style={{ fontSize: 13, color: C.danger }}>{error}</div>}
+        {!error && !src && <div style={{ fontSize: 13, color: C.textFaint }}>Cargando…</div>}
+        {src && attachment.isImage && (
+          <img src={src} alt={attachment.name} style={{ width: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: 8 }} />
+        )}
+        {src && !attachment.isImage && (
+          <a href={src} download={attachment.name} style={{ color: C.accent, fontSize: 14, fontWeight: 600 }}>
+            Descargar {attachment.name}
+          </a>
+        )}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ const KV = "https://keyvalue.immanuel.co/api/KeyVal";
 let cache = {};
 let writeQueue = Promise.resolve();
 let mode = null; // "api" | "shared"
+const fileCache = {};
 
 function parsePointer(raw) {
   if (!raw) return null;
@@ -112,9 +113,44 @@ async function putBoard(data) {
   return true;
 }
 
+async function putFile(payload) {
+  await ensureMode();
+  if (mode === "api") {
+    const id = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    writeQueue = writeQueue.then(async () => {
+      let all = {};
+      try {
+        all = await fetchBoard();
+      } catch (e) {
+        all = { ...cache };
+      }
+      all[`file:${id}`] = payload;
+      all._updatedAt = Date.now();
+      return putBoard(all);
+    });
+    await writeQueue;
+    fileCache[id] = payload;
+    return id;
+  }
+  const id = await writeBox(payload);
+  fileCache[id] = payload;
+  return id;
+}
+
+async function getFile(id) {
+  if (!id) return null;
+  if (fileCache[id]) return fileCache[id];
+  await ensureMode();
+  const payload = mode === "api" ? (await fetchBoard())[`file:${id}`] || null : await readBox(id);
+  if (payload) fileCache[id] = payload;
+  return payload;
+}
+
 export function installStorage() {
   if (typeof window === "undefined") return;
   if (window.storage && typeof window.storage.get === "function" && typeof window.storage.set === "function") {
+    if (typeof window.storage.putFile !== "function") window.storage.putFile = putFile;
+    if (typeof window.storage.getFile !== "function") window.storage.getFile = getFile;
     return;
   }
 
@@ -149,5 +185,7 @@ export function installStorage() {
       });
       return writeQueue;
     },
+    putFile,
+    getFile,
   };
 }
