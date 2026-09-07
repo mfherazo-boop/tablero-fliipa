@@ -1702,7 +1702,24 @@ function TaskCard({ C, task, dragging, onDragStart, onDragEnd, onMoveLeft, onMov
           </div>
         )}
       </div>
-      <div style={{ fontSize: 13.5, lineHeight: 1.4, marginBottom: 10 }}>{task.title}</div>
+      <div style={{ fontSize: 13.5, lineHeight: 1.4, marginBottom: task.description ? 6 : 10 }}>{task.title}</div>
+      {task.description ? (
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.4,
+            color: C.textFaint,
+            marginBottom: 10,
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {task.description}
+        </div>
+      ) : null}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
@@ -1760,6 +1777,7 @@ function arrowStyle(C) {
 
 function AddTaskModal({ C, assignees, onClose, onSave }) {
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [type, setType] = useState("Task");
   const [assignee, setAssignee] = useState(assignees[0] || "__none__");
   const [customAssignee, setCustomAssignee] = useState("");
@@ -1771,7 +1789,15 @@ function AddTaskModal({ C, assignees, onClose, onSave }) {
   function handleSave() {
     if (!title.trim()) return;
     const finalAssignee = useCustom ? customAssignee.trim() : assignee === "__none__" ? "" : assignee.trim();
-    onSave({ title: title.trim(), type, assignee: finalAssignee, status, dueDate: dueDate || null, blocked });
+    onSave({
+      title: title.trim(),
+      description: description.trim(),
+      type,
+      assignee: finalAssignee,
+      status,
+      dueDate: dueDate || null,
+      blocked,
+    });
   }
 
   const label = labelStyle(C);
@@ -1788,7 +1814,16 @@ function AddTaskModal({ C, assignees, onClose, onSave }) {
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 16 }}>Nueva tarea</div>
 
         <label style={label}>Título</label>
-        <textarea autoFocus value={title} onChange={(e) => setTitle(e.target.value)} rows={2} placeholder="¿Qué hay que hacer?" style={{ ...input, resize: "vertical" }} />
+        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="¿Qué hay que hacer?" style={input} />
+
+        <label style={label}>Descripción</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={4}
+          placeholder="Detalles, contexto o criterios de la tarea (opcional)"
+          style={{ ...input, resize: "vertical", minHeight: 88 }}
+        />
 
         <label style={label}>Tipo</label>
         <select value={type} onChange={(e) => setType(e.target.value)} style={input}>
