@@ -1,0 +1,79 @@
+name: Deploy tablero
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Resolver id del tablero compartido
+        run: |
+          mkdir -p public
+          CURRENT=""
+          if [ -f public/board-id.txt ]; then
+            CURRENT=$(tr -d '\r\n' < public/board-id.txt)
+          fi
+          if [ -n "$CURRENT" ] && [ "$CURRENT" != "pending" ]; then
+            echo "Ya hay un board-id publicado"
+          else
+            ID=$(curl -sS -D - -o /tmp/blob.json \
+              -X POST "https://jsonblob.com/api/jsonBlob" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              -d '{}' | awk 'tolower($1)=="x-jsonblob:" {print $2}' | tr -d '\r')
+            if [ -n "$ID" ]; then
+              echo "$ID" > public/board-id.txt
+              echo "Creado board-id $ID"
+            else
+              echo "pending" > public/board-id.txt
+              echo "No se pudo crear el board-id ahora"
+            fi
+          fi
+
+      - name: Instalar y construir
+        run: |
+          npm ci
+          npm run build
+        env:
+          VITE_BASE: /tablero-fliipa/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Publicar Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Guardar board-id en el repo
+        if: success()
+        run: |
+          if [ -f public/board-id.txt ] && [ "$(cat public/board-id.txt)" != "pending" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add public/board-id.txt
+            git diff --cached --quiet || git commit -m "chore: guarda el id del tablero compartido"
+            git push || true
+          fi
