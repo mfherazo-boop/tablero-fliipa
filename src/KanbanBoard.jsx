@@ -241,12 +241,6 @@ const seedTasks = () =>
     },
   ].map((task) => ({ ...task, updatedAt: task.statusChangedAt || task.createdAt }));
 
-const INITIATIVE_SUGGESTIONS = [
-  { id: "sugg-verticales", title: "Expansión a nuevos verticales", owner: "Alejo", progress: 62 },
-  { id: "sugg-onboarding", title: "Rediseño del onboarding de vendedores", owner: "Mafe", progress: 41 },
-  { id: "sugg-reportes", title: "Automatización de reportes financieros", owner: "Ivan", progress: 18 },
-];
-
 function initials(name) {
   if (!name) return "—";
   return name
@@ -560,14 +554,6 @@ export default function KanbanBoard() {
     );
   }
 
-  function addFromSuggestion(sugg) {
-    const already = initiatives.some(
-      (i) => i.title.trim().toLowerCase() === sugg.title.trim().toLowerCase()
-    );
-    if (already) return;
-    addInitiative({ title: sugg.title, owner: sugg.owner, progress: sugg.progress });
-  }
-
   function retryInitSave() {
     setInitiatives((prev) => [...prev]);
   }
@@ -707,7 +693,6 @@ export default function KanbanBoard() {
           <InitiativesView
             C={C}
             initiatives={initiatives}
-            suggestions={INITIATIVE_SUGGESTIONS}
             saving={savingInit}
             error={initError}
             dark={dark}
@@ -715,7 +700,6 @@ export default function KanbanBoard() {
             onOpenNew={() => setInitModalOpen(true)}
             onDelete={deleteInitiative}
             onAdjustProgress={adjustInitiativeProgress}
-            onAddSuggestion={addFromSuggestion}
           />
         ) : (
           <>
@@ -1256,7 +1240,6 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
 function InitiativesView({
   C,
   initiatives,
-  suggestions,
   saving,
   error,
   dark,
@@ -1264,7 +1247,6 @@ function InitiativesView({
   onOpenNew,
   onDelete,
   onAdjustProgress,
-  onAddSuggestion,
 }) {
   return (
     <div>
@@ -1281,7 +1263,7 @@ function InitiativesView({
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Iniciativas estratégicas de Fliipa</div>
           <div style={{ fontSize: 13, color: C.textMuted }}>
-            Crea las tuyas o agrega alguna sugerencia abajo — se guardan igual que las tareas del tablero.
+            Crea las tuyas con el botón de al lado — se guardan igual que las tareas del tablero.
           </div>
         </div>
         <button
@@ -1365,7 +1347,7 @@ function InitiativesView({
             marginBottom: 26,
           }}
         >
-          Aún no tienes iniciativas. Crea una nueva arriba o elige una sugerencia abajo.
+          Aún no tienes iniciativas. Pulsa Nueva iniciativa para crear una.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 26 }}>
@@ -1380,54 +1362,6 @@ function InitiativesView({
           ))}
         </div>
       )}
-
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.textFaint, marginBottom: 10 }}>Sugerencias</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {suggestions.map((s) => {
-          const added = initiatives.some(
-            (i) => i.title.trim().toLowerCase() === s.title.trim().toLowerCase()
-          );
-          return (
-            <div
-              key={s.id}
-              style={{
-                background: "transparent",
-                border: `1px dashed ${C.borderSoft}`,
-                borderRadius: 10,
-                padding: "12px 16px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 16,
-                flexWrap: "wrap",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: C.textMuted }}>{s.title}</div>
-                <div style={{ fontSize: 12, color: C.textFaint, marginTop: 2 }}>
-                  Sugerido para {s.owner} · {s.progress}%
-                </div>
-              </div>
-              <button
-                onClick={() => onAddSuggestion(s)}
-                disabled={added}
-                style={{
-                  background: added ? "none" : C.surfaceRaised,
-                  border: `1px solid ${added ? C.border : C.accent}`,
-                  color: added ? C.textFaint : C.accent,
-                  borderRadius: 8,
-                  padding: "6px 12px",
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  cursor: added ? "default" : "pointer",
-                }}
-              >
-                {added ? "Agregada ✓" : "+ Agregar"}
-              </button>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
