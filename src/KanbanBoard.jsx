@@ -60,6 +60,16 @@ function initiativeColor(ini, index = 0) {
   return AVATAR_COLORS[n % AVATAR_COLORS.length];
 }
 
+function idsMatch(a, b) {
+  if (a == null || b == null || a === "" || b === "") return false;
+  return String(a) === String(b);
+}
+
+function initiativeColumn(ini) {
+  const status = ini && ini.status;
+  return COLUMNS.some((c) => c.id === status) ? status : "backlog";
+}
+
 const TASKS_KEY = "fliipa-kanban:tasks";
 const THEME_KEY = "fliipa-kanban:theme";
 const INITIATIVES_KEY = "fliipa-kanban:initiatives";
@@ -415,6 +425,7 @@ export default function KanbanBoard() {
   const initSaveTimer = useRef(null);
   const initSaveTokenRef = useRef(0);
   const [draggingId, setDraggingId] = useState(null);
+  const [draggingKind, setDraggingKind] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
   const [dark, setDark] = useState(true);
   const [activeTab, setActiveTab] = useState("tablero");
@@ -662,6 +673,7 @@ export default function KanbanBoard() {
         owner,
         progress: Number(progress) || 0,
         color: AVATAR_COLORS[prev.length % AVATAR_COLORS.length],
+        status: "backlog",
         createdAt: now,
         updatedAt: now,
       },
@@ -711,7 +723,7 @@ export default function KanbanBoard() {
 
   const scopedTasks = useMemo(() => {
     if (!initiativeFilter) return tasks;
-    return tasks.filter((t) => t.initiativeId === initiativeFilter);
+    return tasks.filter((t) => idsMatch(t.initiativeId, initiativeFilter));
   }, [tasks, initiativeFilter]);
 
   const filtered = useMemo(() => {
@@ -725,7 +737,7 @@ export default function KanbanBoard() {
   const initiativeStats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return initiatives.map((ini, index) => {
-      const related = tasks.filter((t) => t.initiativeId === ini.id);
+      const related = tasks.filter((t) => idsMatch(t.initiativeId, ini.id));
       const done = related.filter((t) => t.status === "done").length;
       return {
         ...ini,
@@ -750,6 +762,15 @@ export default function KanbanBoard() {
     );
   }
 
+  function dropOnColumn(colId) {
+    if (!draggingId) return;
+    if (draggingKind === "initiative") updateInitiative(draggingId, { status: colId });
+    else moveTask(draggingId, colId);
+    setDraggingId(null);
+    setDraggingKind(null);
+    setDragOverCol(null);
+  }
+
   function moveByOffset(id, offset) {
     const idx = COLUMNS.findIndex((c) => c.id === tasks.find((t) => t.id === id)?.status);
     const next = COLUMNS[idx + offset];
@@ -764,7 +785,7 @@ export default function KanbanBoard() {
 
   function updateInitiative(id, patch) {
     const now = Date.now();
-    setInitiatives((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch, updatedAt: now } : i)));
+    setInitiatives((prev) => prev.map((i) => (idsMatch(i.id, id) ? { ...i, ...patch, updatedAt: now } : i)));
   }
 
   function markPlaneItem({ kind, id, planeWorkItemId }) {
@@ -796,11 +817,25 @@ export default function KanbanBoard() {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, blocked: !t.blocked, updatedAt: now } : t)));
   }
 
+  const boardInitiatives = useMemo(() => {
+    if (!initiativeFilter) return initiatives;
+    return initiatives.filter((ini) => idsMatch(ini.id, initiativeFilter));
+  }, [initiatives, initiativeFilter]);
+
+  const selectedInitiative = useMemo(
+    () => initiatives.find((i) => idsMatch(i.id, initiativeFilter)) || null,
+    [initiatives, initiativeFilter]
+  );
+
   const counts = useMemo(() => {
     const m = {};
-    COLUMNS.forEach((c) => (m[c.id] = filtered.filter((t) => t.status === c.id).length));
+    COLUMNS.forEach((c) => {
+      const taskN = filtered.filter((t) => t.status === c.id).length;
+      const iniN = boardInitiatives.filter((ini) => initiativeColumn(ini) === c.id).length;
+      m[c.id] = taskN + iniN;
+    });
     return m;
-  }, [filtered]);
+  }, [filtered, boardInitiatives]);
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -889,9 +924,13 @@ export default function KanbanBoard() {
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
               <StatCard
                 C={C}
-                label={initiativeFilter ? `Tareas · ${(initiatives.find((i) => i.id === initiativeFilter) || {}).title || "Iniciativa"}` : "Tareas"}
+                label={
+                  selectedInitiative
+                    ? `Tareas · ${selectedInitiative.title}`
+                    : "Tareas"
+                }
                 value={stats.total}
-                caption={initiativeFilter ? "en la iniciativa" : "en total"}
+                caption={selectedInitiative ? "en la iniciativa" : "en total"}
               />
               <StatCard C={C} label="Vencidas" value={stats.vencidas} caption="en total" color={C.danger} />
               <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="en total" />
@@ -921,13 +960,81 @@ export default function KanbanBoard() {
                     <FilterChip
                       key={ini.id}
                       C={C}
-                      active={initiativeFilter === ini.id}
+                      active={idsMatch(initiativeFilter, ini.id)}
                       label={`${ini.title} ${ini.taskCount}`}
                       dotColor={ini.color}
-                      onClick={() => setInitiativeFilter(initiativeFilter === ini.id ? null : ini.id)}
+                      onClick={() => setInitiativeFilter(idsMatch(initiativeFilter, ini.id) ? null : ini.id)}
                     />
                   ))}
                 </div>
+              </div>
+            )}
+
+            {selectedInitiative && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  marginBottom: 14,
+                  padding: "12px 14px",
+                  background: C.surface,
+                  border: `1px solid ${C.borderSoft}`,
+                  borderRadius: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 3,
+                      background: initiativeColor(selectedInitiative),
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>{selectedInitiative.title}</div>
+                    <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 2 }}>
+                      Tablero de esta iniciativa
+                      {selectedInitiative.owner ? ` · ${selectedInitiative.owner}` : ""}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setInitiativeFilter(null)}
+                  style={{
+                    background: "none",
+                    border: `1px solid ${C.border}`,
+                    color: C.textMuted,
+                    borderRadius: 6,
+                    padding: "6px 10px",
+                    fontSize: 12.5,
+                    cursor: "pointer",
+                  }}
+                >
+                  Ver todas
+                </button>
+              </div>
+            )}
+
+            {selectedInitiative && scopedTasks.length === 0 && (
+              <div
+                style={{
+                  marginBottom: 14,
+                  padding: "10px 14px",
+                  background: C.surfaceRaised,
+                  border: `1px dashed ${C.border}`,
+                  borderRadius: 10,
+                  color: C.textMuted,
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                }}
+              >
+                Esta iniciativa ya está en el tablero (columna Backlog). Aún no tiene tareas: pulsa{" "}
+                <strong style={{ color: C.text }}>Nueva tarea</strong> y se asignará aquí.
               </div>
             )}
 
@@ -945,7 +1052,11 @@ export default function KanbanBoard() {
               <div style={{ color: C.textMuted, fontSize: 13.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <span>
                   {filtered.length} tarea{filtered.length !== 1 ? "s" : ""} visible
-                  {filtered.length !== 1 ? "s" : ""} · el equipo ve el mismo tablero en este link
+                  {filtered.length !== 1 ? "s" : ""}
+                  {boardInitiatives.length > 0
+                    ? ` · ${boardInitiatives.length} iniciativa${boardInitiatives.length !== 1 ? "s" : ""} en el tablero`
+                    : ""}
+                  {" · "}el equipo ve el mismo tablero en este link
                 </span>
                 {tasks.length === 0 && (
                   <button
@@ -1093,9 +1204,7 @@ export default function KanbanBoard() {
                   onDragLeave={() => setDragOverCol(null)}
                   onDrop={(e) => {
                     e.preventDefault();
-                    if (draggingId) moveTask(draggingId, col.id);
-                    setDraggingId(null);
-                    setDragOverCol(null);
+                    dropOnColumn(col.id);
                   }}
                   style={{
                     flex: "0 0 268px",
@@ -1123,6 +1232,26 @@ export default function KanbanBoard() {
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {boardInitiatives
+                      .filter((ini) => initiativeColumn(ini) === col.id)
+                      .map((ini) => (
+                        <InitiativeBoardCard
+                          key={"ini-" + ini.id}
+                          C={C}
+                          initiative={ini}
+                          taskCount={(initiativeStats.find((s) => idsMatch(s.id, ini.id)) || {}).taskCount || 0}
+                          dragging={draggingKind === "initiative" && draggingId === ini.id}
+                          onDragStart={() => {
+                            setDraggingKind("initiative");
+                            setDraggingId(ini.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggingId(null);
+                            setDraggingKind(null);
+                          }}
+                          onOpen={() => setInitiativeFilter(ini.id)}
+                        />
+                      ))}
                     {filtered
                       .filter((t) => t.status === col.id)
                       .sort((a, b) => b.createdAt - a.createdAt)
@@ -1131,20 +1260,26 @@ export default function KanbanBoard() {
                           key={task.id}
                           C={C}
                           task={task}
-                          dragging={draggingId === task.id}
-                          onDragStart={() => setDraggingId(task.id)}
-                          onDragEnd={() => setDraggingId(null)}
+                          dragging={draggingKind !== "initiative" && draggingId === task.id}
+                          onDragStart={() => {
+                            setDraggingKind("task");
+                            setDraggingId(task.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggingId(null);
+                            setDraggingKind(null);
+                          }}
                           onMoveLeft={colIdx > 0 ? () => moveByOffset(task.id, -1) : null}
                           onMoveRight={colIdx < COLUMNS.length - 1 ? () => moveByOffset(task.id, 1) : null}
                           onDelete={() => deleteTask(task.id)}
                           onToggleBlocked={() => toggleBlocked(task.id)}
                           onOpen={() => setOpenTaskId(task.id)}
-                          initiative={initiatives.find((i) => i.id === task.initiativeId) || null}
+                          initiative={initiatives.find((i) => idsMatch(i.id, task.initiativeId)) || null}
                         />
                       ))}
                     {counts[col.id] === 0 && (
                       <div style={{ fontSize: 12.5, color: C.textFaint, padding: "10px 4px", textAlign: "center" }}>
-                        Sin tareas aquí
+                        Sin tarjetas aquí
                       </div>
                     )}
                   </div>
@@ -1674,7 +1809,7 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen }) {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{initiative.title}</div>
           <div style={{ fontSize: 12, color: C.textFaint, marginTop: 2 }}>
-            {initiative.taskCount || 0} en el tablero
+            {initiative.taskCount || 0} tarea{(initiative.taskCount || 0) !== 1 ? "s" : ""}
           </div>
         </div>
       </div>
@@ -1932,11 +2067,51 @@ function FilterChip({ C, active, label, onClick, dotColor }) {
         padding: "6px 12px",
         fontSize: 13,
         cursor: "pointer",
+        maxWidth: 280,
       }}
     >
-      {dotColor && <span style={{ width: 7, height: 7, borderRadius: "50%", background: dotColor, display: "inline-block" }} />}
-      {label}
+      {dotColor && <span style={{ width: 7, height: 7, borderRadius: "50%", background: dotColor, display: "inline-block", flexShrink: 0 }} />}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
     </button>
+  );
+}
+
+function InitiativeBoardCard({ C, initiative, taskCount, dragging, onDragStart, onDragEnd, onOpen }) {
+  const color = initiativeColor(initiative);
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onClick={onOpen}
+      style={{
+        background: C.surfaceRaised,
+        border: `1px solid ${C.border}`,
+        borderLeft: `3px solid ${color}`,
+        borderRadius: 9,
+        padding: "10px 11px",
+        cursor: dragging ? "grabbing" : "pointer",
+        opacity: dragging ? 0.4 : 1,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+        <span
+          style={{
+            fontSize: 10.5,
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            color,
+          }}
+        >
+          Iniciativa
+        </span>
+      </div>
+      <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35, marginBottom: 8 }}>{initiative.title}</div>
+      <div style={{ fontSize: 12, color: C.textFaint }}>
+        {initiative.owner || "Sin asignar"} · {taskCount} tarea{taskCount !== 1 ? "s" : ""}
+      </div>
+    </div>
   );
 }
 
