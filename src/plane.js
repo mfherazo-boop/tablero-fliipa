@@ -3,7 +3,7 @@ export const DEFAULT_PLANE_BASE = "https://api.plane.so";
 
 const TYPE_COLORS = {
   Bug: "#E2574C",
-  Feature: "#4C9F70",
+  Feature: "#3EE0B4",
   Task: "#4C7EF3",
   Mejora: "#B48EDE",
   Iniciativa: "#6D5DFC",
@@ -30,6 +30,11 @@ export function parseWorkspaceInput(text) {
   const fromPath = value.match(/workspaces\/([^/?#]+)/i);
   if (fromPath) return fromPath[1];
   return value.replace(/^\/+|\/+$/g, "");
+}
+
+function sameId(a, b) {
+  if (a == null || b == null || a === "") return false;
+  return String(a) === String(b);
 }
 
 function resultsOf(data) {
@@ -183,14 +188,20 @@ async function ensureReviewState(cfg, states) {
   }
 }
 
-function buildTaskHtml(task) {
+function buildTaskHtml(task, initiative) {
   const lines = [];
   if (task.description) {
     escapeHtml(task.description)
       .split(/\n/)
       .forEach((line) => lines.push(`<p>${line || "&nbsp;"}</p>`));
   }
+  if (task.notes) {
+    escapeHtml(task.notes)
+      .split(/\n/)
+      .forEach((line) => lines.push(`<p>${line || "&nbsp;"}</p>`));
+  }
   const extras = [];
+  if (initiative && initiative.title) extras.push(`Iniciativa: ${escapeHtml(initiative.title)}`);
   if (task.type) extras.push(`Tipo: ${escapeHtml(TASK_TYPES_LABEL(task.type))}`);
   if (task.blocked) extras.push("Marcada como bloqueada en Fliipa");
   if (task.assignee) extras.push(`Responsable en Fliipa: ${escapeHtml(task.assignee)}`);
@@ -211,11 +222,14 @@ function TASK_TYPES_LABEL(type) {
 }
 
 function buildInitiativeHtml(initiative) {
-  const lines = [
-    `<p>Iniciativa estratégica migrada desde Fliipa.</p>`,
-    `<p>Responsable: ${escapeHtml(initiative.owner || "Sin asignar")}</p>`,
-    `<p>Progreso: ${Number(initiative.progress) || 0}%</p>`,
-  ];
+  const lines = [`<p>Iniciativa estratégica migrada desde Fliipa.</p>`];
+  if (initiative.notes) {
+    escapeHtml(initiative.notes)
+      .split(/\n/)
+      .forEach((line) => lines.push(`<p>${line || "&nbsp;"}</p>`));
+  }
+  lines.push(`<p>Responsable: ${escapeHtml(initiative.owner || "Sin asignar")}</p>`);
+  lines.push(`<p>Progreso: ${Number(initiative.progress) || 0}%</p>`);
   return lines.join("");
 }
 
@@ -263,11 +277,13 @@ export function buildMigrationPackage({ tasks, initiatives }) {
       id: t.id,
       title: t.title,
       description: t.description || "",
+      notes: t.notes || "",
       type: t.type,
       assignee: t.assignee || "",
       status: t.status,
       dueDate: t.dueDate || null,
       blocked: !!t.blocked,
+      initiativeId: t.initiativeId || null,
       attachments: (t.attachments || []).map((a) => ({ id: a.id, name: a.name, type: a.type, isImage: !!a.isImage })),
       planeWorkItemId: t.planeWorkItemId || null,
     })),
@@ -276,6 +292,9 @@ export function buildMigrationPackage({ tasks, initiatives }) {
       title: i.title,
       owner: i.owner || "",
       progress: Number(i.progress) || 0,
+      status: i.status || "backlog",
+      notes: i.notes || "",
+      dueDate: i.dueDate || null,
       planeWorkItemId: i.planeWorkItemId || null,
     })),
   };
@@ -318,23 +337,34 @@ export async function migrateToPlane({
   }
 
   const items = [
-    ...(tasks || []).map((task) => ({ kind: "task", item: task })),
     ...(initiatives || []).map((initiative) => ({ kind: "initiative", item: initiative })),
+    ...(tasks || []).map((task) => ({ kind: "task", item: task })),
   ];
   const summary = { created: 0, updated: 0, failed: 0, errors: [] };
+  const planeIds = {};
+  (initiatives || []).forEach((ini) => {
+    if (ini.planeWorkItemId) planeIds[ini.id] = ini.planeWorkItemId;
+  });
+  (tasks || []).forEach((task) => {
+    if (task.planeWorkItemId) planeIds[task.id] = task.planeWorkItemId;
+  });
 
   for (let i = 0; i < items.length; i++) {
     const { kind, item } = items[i];
     if (onProgress) onProgress({ current: i + 1, total: items.length, label: item.title || item.id });
     try {
       const existing =
-        (item.planeWorkItemId && { id: item.planeWorkItemId }) || (await findExisting(cfg, item.id));
+        (item.planeWorkItemId && { id: item.planeWorkItemId }) ||
+        (planeIds[item.id] && { id: planeIds[item.id] }) ||
+        (await findExisting(cfg, item.id));
       let payload;
       if (kind === "task") {
         const member = matchMember(members, item.assignee);
+        const initiative = (initiatives || []).find((ini) => sameId(ini.id, item.initiativeId));
+        const parentId = item.initiativeId ? planeIds[item.initiativeId] || initiative?.planeWorkItemId : null;
         payload = {
           name: item.title || "Sin título",
-          description_html: buildTaskHtml(item),
+          description_html: buildTaskHtml(item, initiative),
           state: (stateMap[item.status] || stateMap.todo)?.id,
           target_date: item.dueDate || null,
           priority: item.blocked ? "high" : "none",
@@ -343,12 +373,14 @@ export async function migrateToPlane({
           external_source: PLANE_SOURCE,
           external_id: item.id,
         };
+        if (parentId) payload.parent = parentId;
       } else {
         const member = matchMember(members, item.owner);
         payload = {
           name: item.title || "Iniciativa",
           description_html: buildInitiativeHtml(item),
-          state: stateMap.backlog?.id || stateMap.todo?.id,
+          state: (stateMap[item.status] || stateMap.backlog || stateMap.todo)?.id,
+          target_date: item.dueDate || null,
           priority: "none",
           labels: typeLabels.Iniciativa ? [typeLabels.Iniciativa.id] : [],
           assignees: member && memberId(member) ? [memberId(member)] : [],
@@ -356,11 +388,22 @@ export async function migrateToPlane({
           external_id: item.id,
         };
       }
-      const saved = await upsertWorkItem(cfg, payload, existing?.id);
+      let saved;
+      try {
+        saved = await upsertWorkItem(cfg, payload, existing?.id);
+      } catch (e) {
+        if (payload.parent) {
+          delete payload.parent;
+          saved = await upsertWorkItem(cfg, payload, existing?.id);
+        } else {
+          throw e;
+        }
+      }
       if (existing?.id) summary.updated += 1;
       else summary.created += 1;
-      if (onItemMigrated && saved?.id) {
-        onItemMigrated({ kind, id: item.id, planeWorkItemId: saved.id });
+      if (saved?.id) {
+        planeIds[item.id] = saved.id;
+        if (onItemMigrated) onItemMigrated({ kind, id: item.id, planeWorkItemId: saved.id });
       }
     } catch (e) {
       summary.failed += 1;

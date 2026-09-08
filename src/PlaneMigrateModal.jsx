@@ -171,13 +171,16 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
       <div
         onClick={(e) => e.stopPropagation()}
         style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 520, padding: 20, maxHeight: "90vh", overflowY: "auto" }}
+        className="fliipa-modal-pad"
       >
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 8 }}>
-          Migrar a Plane
+          Migrar todo a Plane
         </div>
         <div style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.5, marginBottom: 8 }}>
-          Sigan usando este Kanban con normalidad. Cuando quieran pasar todo a Plane (project management),
-          esta opción envía las tareas e iniciativas al proyecto que elijan. No borra nada de aquí.
+          Sigan trabajando aquí. Cuando quieran pasar el Kanban a Plane, esta opción envía{" "}
+          <strong style={{ color: C.text, fontWeight: 600 }}>todas las iniciativas y tareas</strong> al proyecto
+          que elijan. No borra ni deja de sincronizar este tablero: Fliipa sigue siendo la fuente de trabajo
+          hasta que decidan quedarse solo en Plane.
         </div>
         <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 8 }}>
           Ahora mismo hay {tasks.length} tarea{tasks.length === 1 ? "" : "s"} y {initiatives.length} iniciativa{initiatives.length === 1 ? "" : "s"}

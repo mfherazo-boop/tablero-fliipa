@@ -1063,7 +1063,7 @@ export default function KanbanBoard() {
           .fliipa-modal-pad { padding: 12px !important; }
         }
         @media (max-width: 560px) {
-          .fliipa-avatars, .fliipa-plane-btn { display: none !important; }
+          .fliipa-avatars { display: none !important; }
           .fliipa-stat { padding: 12px 12px !important; }
           .fliipa-col {
             flex: 0 0 86% !important;
@@ -1626,19 +1626,20 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             className="fliipa-plane-btn"
             onClick={onOpenPlane}
             style={{
-              background: "none",
-              border: `1px solid ${C.border}`,
-              color: C.text,
-              borderRadius: 6,
+              background: C.accentSoft,
+              border: `1px solid ${C.accent}`,
+              color: C.accent,
+              borderRadius: 8,
               padding: "5px 10px",
               cursor: "pointer",
               fontSize: 12.5,
-              fontWeight: 600,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
             }}
-            aria-label="Migrar a Plane"
-            title="Migrar este tablero a Plane"
+            aria-label="Migrar todo a Plane"
+            title="Enviar iniciativas y tareas a Plane cuando quieran dejar de usar este Kanban"
           >
-            Plane
+            Migrar a Plane
           </button>
           <button
             onClick={onOpenExport}
@@ -2611,6 +2612,9 @@ function InitiativeBoardCard({ C, initiative, taskCount, progress, dragging, onD
           {initiative.title}
         </span>
         <span style={{ fontSize: 12, color: C.textFaint }}>Iniciativa</span>
+        {initiative.planeWorkItemId && (
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", color: C.accent }}>PLANE</span>
+        )}
       </div>
       <div style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.35, marginBottom: 10 }}>{initiative.title}</div>
       <div
@@ -2798,6 +2802,9 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
           >
             {idleLabel(task)}
           </span>
+          {task.planeWorkItemId && (
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", color: C.accent }}>PLANE</span>
+          )}
         </div>
       </div>
     </div>
