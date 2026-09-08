@@ -42,11 +42,11 @@ const TASK_TYPES = {
 };
 
 const COLUMNS = [
-  { id: "backlog", label: "Backlog" },
-  { id: "todo", label: "Por hacer" },
-  { id: "in_progress", label: "En progreso" },
-  { id: "review", label: "En revisión" },
-  { id: "done", label: "Hecho" },
+  { id: "backlog", label: "Backlog", dot: "#9AA3B2" },
+  { id: "todo", label: "Por hacer", dot: "#E7E5DF" },
+  { id: "in_progress", label: "En progreso", dot: "#8B7CFF" },
+  { id: "review", label: "En revisión", dot: "#B48EDE" },
+  { id: "done", label: "Hecho", dot: "#3FA66B" },
 ];
 
 const ROSTER = ["Mafe", "William", "Alejo", "Aleja", "Fran", "Ivan"];
@@ -384,6 +384,30 @@ function timeAgo(ts) {
   if (days <= 0) return "hoy";
   if (days === 1) return "hace 1 día";
   return `hace ${days} días`;
+}
+
+function taskNumber(task) {
+  const digits = String((task && task.id) || "").replace(/\D/g, "");
+  if (digits.length >= 3) return digits.slice(-3);
+  let h = 0;
+  const seed = String((task && (task.id || task.title)) || "t");
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return String((h % 900) + 100);
+}
+
+function idleLabel(task) {
+  const ts = (task && (task.updatedAt || task.statusChangedAt || task.createdAt)) || 0;
+  if (!ts) return null;
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  if (days <= 0) return "actualizada hoy";
+  if (days === 1) return "1 d sin actualizar";
+  return `${days} d sin actualizar`;
+}
+
+function recentlyChangedStatus(task) {
+  if (!task || !task.statusChangedAt) return false;
+  if (task.createdAt && Math.abs(task.statusChangedAt - task.createdAt) < 60000) return false;
+  return Date.now() - task.statusChangedAt <= 7 * 86400000;
 }
 
 function formatUpdated(ts) {
@@ -1211,17 +1235,20 @@ export default function KanbanBoard() {
                     dropOnColumn(col.id);
                   }}
                   style={{
-                    flex: "0 0 268px",
+                    flex: "0 0 286px",
                     background: C.surface,
                     border: `1px solid ${dragOverCol === col.id ? C.accent : C.borderSoft}`,
-                    borderRadius: 12,
+                    borderRadius: 14,
                     padding: 12,
                     minHeight: 420,
                     transition: "border-color 120ms ease",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 4px 12px" }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>{col.label}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 14px" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: col.dot || C.textMuted, display: "inline-block" }} />
+                      {col.label}
+                    </span>
                     <span
                       style={{
                         fontSize: 12,
@@ -2091,30 +2118,51 @@ function InitiativeBoardCard({ C, initiative, taskCount, dragging, onDragStart, 
       onClick={onOpen}
       style={{
         background: C.surfaceRaised,
-        border: `1px solid ${C.border}`,
-        borderLeft: `3px solid ${color}`,
-        borderRadius: 9,
-        padding: "10px 11px",
+        border: `1px solid ${C.borderSoft}`,
+        borderRadius: 12,
+        padding: "14px 14px 12px",
         cursor: dragging ? "grabbing" : "pointer",
         opacity: dragging ? 0.4 : 1,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <span
           style={{
-            fontSize: 10.5,
+            fontSize: 11,
             fontWeight: 700,
-            letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            color,
+            color: "#0B1A14",
+            background: color,
+            borderRadius: 20,
+            padding: "2px 8px",
+            maxWidth: 170,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
-          Iniciativa
+          {initiative.title}
         </span>
+        <span style={{ fontSize: 12, color: C.textFaint }}>Iniciativa</span>
       </div>
-      <div style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.35, marginBottom: 8 }}>{initiative.title}</div>
-      <div style={{ fontSize: 12, color: C.textFaint }}>
-        {initiative.owner || "Sin asignar"} · {taskCount} tarea{taskCount !== 1 ? "s" : ""}
+      <div style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.35, marginBottom: 10 }}>{initiative.title}</div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          background: C.surface,
+          borderRadius: 8,
+          padding: "7px 9px",
+          marginBottom: 12,
+          color: C.textMuted,
+          fontSize: 12,
+        }}
+      >
+        <span style={{ opacity: 0.7 }}>◇</span>
+        {taskCount} tarea{taskCount !== 1 ? "s" : ""}
+      </div>
+      <div style={{ fontSize: 12.5, color: initiative.owner ? C.text : C.textMuted, fontStyle: initiative.owner ? "normal" : "italic" }}>
+        {initiative.owner || "Sin asignar"}
       </div>
     </div>
   );
@@ -2125,6 +2173,8 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
   const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
   const today = new Date().toISOString().slice(0, 10);
   const isOverdue = task.dueDate && task.dueDate < today && task.status !== "done";
+  const iniColor = initiative ? initiativeColor(initiative) : C.accent;
+  const shortIni = initiative ? initiative.title : null;
   return (
     <div
       draggable
@@ -2139,50 +2189,41 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
       style={{
         background: C.surfaceRaised,
         border: `1px solid ${selected ? C.accent : C.borderSoft}`,
-        borderLeft: `3px solid ${typeMeta.color}`,
-        borderRadius: 9,
-        padding: "10px 11px",
+        borderRadius: 12,
+        padding: "14px 14px 12px",
         cursor: dragging ? "grabbing" : "pointer",
         opacity: dragging ? 0.4 : 1,
         boxShadow: selected ? `0 0 0 1px ${C.accent}` : "none",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-          {initiative && (
-            <span
-              style={{
-                fontSize: 10.5,
-                fontWeight: 600,
-                color: initiativeColor(initiative),
-                background: C.surface,
-                border: `1px solid ${C.borderSoft}`,
-                borderRadius: 20,
-                padding: "1px 7px",
-                maxWidth: 150,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {initiative.title}
-            </span>
-          )}
-          <span style={{ fontSize: 11, fontWeight: 600, color: typeMeta.color }}>{typeMeta.label}</span>
-          {task.blocked && (
-            <span style={{ fontSize: 10.5, fontWeight: 600, color: C.textFaint, background: C.border, borderRadius: 4, padding: "1px 6px" }}>
-              Bloqueada
-            </span>
-          )}
-          {isOverdue && <span style={{ fontSize: 10.5, fontWeight: 600, color: C.danger }}>Vencida</span>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+          <span
+            title={shortIni || typeMeta.label}
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#0B1A14",
+              background: shortIni ? iniColor : typeMeta.color,
+              borderRadius: 20,
+              padding: "2px 8px",
+              maxWidth: 148,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              flexShrink: 1,
+            }}
+          >
+            {shortIni || typeMeta.label}
+          </span>
+          <span style={{ fontSize: 12, color: C.textFaint, flexShrink: 0 }}>#{taskNumber(task)}</span>
         </div>
         {hover && (
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: C.accent }}>Editar</span>
+          <div style={{ display: "flex", gap: 2, alignItems: "center", flexShrink: 0 }}>
             <button
               onClick={onToggleBlocked}
               aria-label={task.blocked ? "Desbloquear tarea" : "Bloquear tarea"}
-              style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }}
+              style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer", fontSize: 12, lineHeight: 1, padding: 2 }}
             >
               {task.blocked ? "🔓" : "🔒"}
             </button>
@@ -2196,103 +2237,95 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
           </div>
         )}
       </div>
-      <div style={{ fontSize: 13.5, lineHeight: 1.4, marginBottom: task.description ? 6 : 10 }}>{task.title}</div>
-      {task.description ? (
+
+      {recentlyChangedStatus(task) && (
         <div
           style={{
-            fontSize: 12,
-            lineHeight: 1.4,
-            color: C.textFaint,
-            marginBottom: 10,
-            display: "-webkit-box",
-            WebkitLineClamp: 3,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-            whiteSpace: "pre-wrap",
+            display: "inline-block",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.04em",
+            color: "#7CFFB2",
+            background: "rgba(63,166,107,0.16)",
+            borderRadius: 6,
+            padding: "2px 7px",
+            marginBottom: 8,
           }}
         >
-          {task.description}
-        </div>
-      ) : null}
-      {Array.isArray(task.attachments) && task.attachments.length > 0 && (
-        <div
-          style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {task.attachments.map((att) => (
-            <button
-              key={att.id}
-              type="button"
-              draggable={false}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onOpen && onOpen();
-              }}
-              title={att.name}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                maxWidth: "100%",
-                background: C.surface,
-                border: `1px solid ${C.borderSoft}`,
-                borderRadius: 7,
-                padding: att.isImage && att.thumb ? 2 : "4px 7px",
-                color: C.textMuted,
-                fontSize: 11,
-                cursor: "pointer",
-              }}
-            >
-              {att.isImage && att.thumb ? (
-                <img src={att.thumb} alt={att.name} style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5, display: "block" }} />
-              ) : (
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {att.name}
-                </span>
-              )}
-            </button>
-          ))}
+          CAMBIÓ ESTADO
         </div>
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: "50%",
-              background: C.border,
-              color: C.text,
-              fontSize: 10.5,
-              fontWeight: 600,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            title={task.assignee || "Sin asignar"}
-          >
-            {initials(task.assignee)}
-          </span>
-          <span style={{ fontSize: 11.5, color: C.textFaint }}>{timeAgo(task.createdAt)}</span>
+
+      <div style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.35, marginBottom: 10 }}>{task.title}</div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          background: C.surface,
+          borderRadius: 8,
+          padding: "7px 9px",
+          marginBottom: 8,
+          color: C.textMuted,
+          fontSize: 12,
+          minWidth: 0,
+        }}
+      >
+        <span style={{ color: typeMeta.color, flexShrink: 0 }}>◇</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{typeMeta.label}</span>
+        {task.blocked && <span style={{ marginLeft: "auto", fontSize: 10.5, color: C.textFaint, flexShrink: 0 }}>Bloqueada</span>}
+        {isOverdue && <span style={{ marginLeft: task.blocked ? 6 : "auto", fontSize: 10.5, color: C.danger, flexShrink: 0 }}>Vencida</span>}
+      </div>
+
+      {Array.isArray(task.attachments) && task.attachments.length > 0 && (
+        <div style={{ fontSize: 11.5, color: C.textFaint, marginBottom: 8 }}>
+          {task.attachments.length} adjunto{task.attachments.length !== 1 ? "s" : ""}
         </div>
-        <div style={{ display: "flex", gap: 2 }}>
-          {onMoveLeft && (
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginTop: 4 }}>
+        <span
+          style={{
+            fontSize: 12.5,
+            color: task.assignee ? C.text : C.textMuted,
+            fontStyle: task.assignee ? "normal" : "italic",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {task.assignee || "Sin asignar"}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+          {hover && onMoveLeft && (
             <button onClick={onMoveLeft} aria-label="Mover a columna anterior" style={arrowStyle(C)}>
               ‹
             </button>
           )}
-          {onMoveRight && (
+          {hover && onMoveRight && (
             <button onClick={onMoveRight} aria-label="Mover a columna siguiente" style={arrowStyle(C)}>
               ›
             </button>
           )}
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: C.textMuted,
+              background: C.surface,
+              borderRadius: 20,
+              padding: "3px 8px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {idleLabel(task)}
+          </span>
         </div>
       </div>
     </div>
   );
 }
-
 function arrowStyle(C) {
   return {
     background: "none",
