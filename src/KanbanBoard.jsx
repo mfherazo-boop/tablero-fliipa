@@ -963,7 +963,7 @@ export default function KanbanBoard() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
-        html, body, #root { height: 100%; background: ${C.bg}; }
+        html, body, #root { height: 100%; background: ${C.bg}; max-width: 100%; overflow-x: hidden; }
         ::-webkit-scrollbar { height: 8px; width: 8px; }
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -977,6 +977,86 @@ export default function KanbanBoard() {
         }
         @media (prefers-reduced-motion: reduce) {
           * { transition: none !important; animation: none !important; }
+        }
+        .fliipa-page { padding: 22px 20px 40px; }
+        .fliipa-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+        .fliipa-pills { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; }
+        .fliipa-board {
+          display: flex;
+          gap: 14px;
+          overflow-x: auto;
+          padding-bottom: 8px;
+          -webkit-overflow-scrolling: touch;
+        }
+        .fliipa-init-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .fliipa-modal-pad { padding: 20px; }
+        @media (max-width: 900px) {
+          .fliipa-page { padding: 14px 12px 28px; }
+          .fliipa-top-row { padding: 8px 12px !important; }
+          .fliipa-title-row { padding: 10px 12px !important; }
+          .fliipa-title { font-size: 18px !important; }
+          .fliipa-subtitle, .fliipa-updated, .fliipa-share-btn { display: none !important; }
+          .fliipa-stat {
+            flex: 1 1 calc(50% - 8px) !important;
+            min-width: calc(50% - 8px) !important;
+          }
+          .fliipa-ini-row, .fliipa-filter-row {
+            flex-direction: column !important;
+            align-items: stretch !important;
+          }
+          .fliipa-row-label {
+            padding-top: 0 !important;
+            min-width: 0 !important;
+            margin-bottom: 4px;
+          }
+          .fliipa-pills {
+            flex-wrap: nowrap !important;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            -webkit-overflow-scrolling: touch;
+          }
+          .fliipa-pills button { flex-shrink: 0; }
+          .fliipa-filter-controls {
+            width: 100%;
+          }
+          .fliipa-filter-controls select {
+            min-width: 0 !important;
+            flex: 1 1 calc(50% - 8px);
+          }
+          .fliipa-new-task {
+            width: 100% !important;
+            text-align: center;
+          }
+          .fliipa-board {
+            gap: 10px;
+            margin: 0 -12px;
+            padding: 4px 12px 16px;
+            scroll-snap-type: x mandatory;
+            scroll-padding-left: 12px;
+          }
+          .fliipa-col {
+            flex: 0 0 min(280px, calc(100vw - 56px)) !important;
+            min-height: 340px !important;
+            scroll-snap-align: start;
+          }
+          .fliipa-drawer {
+            width: 100% !important;
+            border-left: none !important;
+          }
+          .fliipa-init-head { display: none !important; }
+          .fliipa-init-row {
+            min-width: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 10px !important;
+          }
+          .fliipa-init-kpis { justify-content: space-between; }
+          .fliipa-modal-pad { padding: 12px !important; }
+        }
+        @media (max-width: 560px) {
+          .fliipa-avatars, .fliipa-plane-btn { display: none !important; }
+          .fliipa-stat { padding: 12px 12px !important; }
         }
       `}</style>
 
@@ -993,7 +1073,7 @@ export default function KanbanBoard() {
         onOpenPlane={() => setPlaneOpen(true)}
       />
 
-      <div style={{ padding: "22px 20px 40px" }}>
+      <div className="fliipa-page">
         {activeTab === "iniciativas" ? (
           <InitiativesView
             C={C}
@@ -1015,7 +1095,7 @@ export default function KanbanBoard() {
         ) : (
           <>
             {/* Métricas */}
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
+            <div className="fliipa-stats">
               <StatCard
                 C={C}
                 label={
@@ -1040,6 +1120,7 @@ export default function KanbanBoard() {
             </div>
 
             <div
+              className="fliipa-filter-card"
               style={{
                 background: C.surface,
                 border: `1px solid ${C.borderSoft}`,
@@ -1048,9 +1129,9 @@ export default function KanbanBoard() {
                 marginBottom: 18,
               }}
             >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
-                <div style={rowLabel(C)}>Iniciativa</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
+              <div className="fliipa-ini-row" style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+                <div className="fliipa-row-label" style={rowLabel(C)}>Iniciativa</div>
+                <div className="fliipa-pills">
                   <FilterChip
                     C={C}
                     active={!initiativeFilter}
@@ -1071,6 +1152,7 @@ export default function KanbanBoard() {
               </div>
 
               <div
+                className="fliipa-filter-row"
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -1079,8 +1161,8 @@ export default function KanbanBoard() {
                   flexWrap: "wrap",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
-                  <div style={rowLabel(C)}>Filtros</div>
+                <div className="fliipa-filter-controls" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
+                  <div className="fliipa-row-label" style={rowLabel(C)}>Filtros</div>
                   <select
                     value={assigneeFilter}
                     onChange={(e) => setAssigneeFilter(e.target.value)}
@@ -1138,6 +1220,7 @@ export default function KanbanBoard() {
                   )}
                 </div>
                 <button
+                  className="fliipa-new-task"
                   onClick={() => setModalOpen(true)}
                   style={{
                     background: C.accent,
@@ -1241,9 +1324,10 @@ export default function KanbanBoard() {
             )}
 
             {/* Tablero */}
-            <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
+            <div className="fliipa-board">
               {COLUMNS.map((col, colIdx) => (
                 <div
+                  className="fliipa-col"
                   key={col.id}
                   onDragOver={(e) => {
                     e.preventDefault();
@@ -1487,6 +1571,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
     <div style={{ borderBottom: `1px solid ${C.borderSoft}`, background: C.bg }}>
       {/* Fila 1: breadcrumb + avatares + compartir */}
       <div
+        className="fliipa-top-row"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -1500,7 +1585,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
           <span style={{ fontSize: 11, color: C.textFaint }}>⌄</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ display: "flex" }}>
+          <div className="fliipa-avatars" style={{ display: "flex" }}>
             {["Mafe", "Ivan"].map((name, i) => (
               <span
                 key={name}
@@ -1525,6 +1610,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             ))}
           </div>
           <button
+            className="fliipa-plane-btn"
             onClick={onOpenPlane}
             style={{
               background: "none",
@@ -1593,6 +1679,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             ⛓
           </button>
           <button
+            className="fliipa-share-btn"
             onClick={handleShare}
             style={{
               background: "none",
@@ -1613,6 +1700,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
 
       {/* Fila 2: título + tabs + estado */}
       <div
+        className="fliipa-title-row"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -1624,12 +1712,12 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
       >
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700 }}>
+            <span className="fliipa-title" style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700 }}>
               Fliipa: Tablero de tareas
             </span>
-            <span style={{ fontSize: 13, color: C.textFaint }}>Equipo de producto</span>
+            <span className="fliipa-subtitle" style={{ fontSize: 13, color: C.textFaint }}>Equipo de producto</span>
           </div>
-          <div style={{ display: "flex", gap: 18, marginLeft: 8 }}>
+          <div style={{ display: "flex", gap: 18, marginLeft: 0 }}>
             {[
               { id: "iniciativas", label: "Iniciativas" },
               { id: "tablero", label: "Tablero" },
@@ -1655,7 +1743,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span style={{ fontSize: 12.5, color: C.textFaint }}>
+          <span className="fliipa-updated" style={{ fontSize: 12.5, color: C.textFaint }}>
             Última actualización <strong style={{ color: C.textMuted }}>{lastUpdated}</strong>
           </span>
           <span
@@ -1721,7 +1809,7 @@ function InitiativesView({
 }) {
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
+      <div className="fliipa-stats">
         <StatCard C={C} label="Tareas" value={(stats && stats.total) || 0} caption="en total" color={C.accent} />
         <StatCard C={C} label="Vencidas" value={(stats && stats.vencidas) || 0} caption="en total" color={(stats && stats.vencidas) ? C.danger : C.text} />
         <StatCard C={C} label="Sin asignar" value={(stats && stats.sinAsignar) || 0} caption="en total" color={C.text} />
@@ -1751,6 +1839,7 @@ function InitiativesView({
           </div>
         </div>
         <button
+          className="fliipa-new-task"
           onClick={onOpenNew}
           style={{
             background: C.accent,
@@ -1834,11 +1923,12 @@ function InitiativesView({
           Aún no tienes iniciativas. Pulsa Nueva iniciativa para crear una.
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 26 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 26 }} className="fliipa-init-list">
           <div
+            className="fliipa-init-head"
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(220px, 2fr) 140px 70px 80px 90px minmax(140px, 1fr) 28px",
+              gridTemplateColumns: "minmax(180px, 2fr) 120px auto minmax(140px, 1fr) 52px",
               gap: 10,
               padding: "0 14px",
               fontSize: 11,
@@ -1851,8 +1941,6 @@ function InitiativesView({
             <div>Iniciativa</div>
             <div>Responsable</div>
             <div>Tareas</div>
-            <div>Vencidas</div>
-            <div>Sin asignar</div>
             <div>% de avance</div>
           </div>
           {initiatives.map((ini) => (
@@ -1878,6 +1966,7 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen, onE
   const statusLabel = (COLUMNS.find((c) => c.id === initiativeColumn(initiative)) || {}).label || "Nuevo";
   return (
     <div
+      className="fliipa-init-row"
       onClick={onOpen}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -1887,7 +1976,7 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen, onE
         borderRadius: 10,
         padding: "14px 16px",
         display: "grid",
-        gridTemplateColumns: "minmax(220px, 2fr) 140px 70px 80px 90px minmax(140px, 1fr) auto",
+        gridTemplateColumns: "minmax(180px, 2fr) 120px auto minmax(140px, 1fr) auto",
         gap: 10,
         alignItems: "center",
         cursor: "pointer",
@@ -1903,9 +1992,11 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen, onE
         </div>
       </div>
       <div style={{ fontSize: 13, color: C.textMuted }}>{initiative.owner || "Sin asignar"}</div>
-      <div style={{ fontSize: 13, fontWeight: 600 }}>{initiative.taskCount || 0}</div>
-      <div style={{ fontSize: 13, color: initiative.vencidas ? C.danger : C.textMuted }}>{initiative.vencidas || 0}</div>
-      <div style={{ fontSize: 13, color: C.textMuted }}>{initiative.sinAsignar || 0}</div>
+      <div className="fliipa-init-kpis" style={{ display: "flex", gap: 14, fontSize: 13 }}>
+        <span><span style={{ color: C.textFaint, fontSize: 11, display: "block" }}>Tareas</span>{initiative.taskCount || 0}</span>
+        <span><span style={{ color: C.textFaint, fontSize: 11, display: "block" }}>Vencidas</span><span style={{ color: initiative.vencidas ? C.danger : C.text }}>{initiative.vencidas || 0}</span></span>
+        <span><span style={{ color: C.textFaint, fontSize: 11, display: "block" }}>Sin asignar</span>{initiative.sinAsignar || 0}</span>
+      </div>
       <div>
         <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>
           {initiative.progress || 0}% · {initiative.closed || 0} de {initiative.taskCount || 0} en Hecho
@@ -1935,18 +2026,16 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen, onE
         >
           ✎
         </button>
-        {hover && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            aria-label="Eliminar iniciativa"
-            style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 2 }}
-          >
-            ✕
-          </button>
-        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          aria-label="Eliminar iniciativa"
+          style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 2 }}
+        >
+          ✕
+        </button>
       </div>
     </div>
   );
@@ -2028,6 +2117,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={initiative.title || "Detalle de la iniciativa"}
+        className="fliipa-drawer"
         style={{
           width: "min(420px, 100%)",
           height: "100%",
@@ -2410,7 +2500,7 @@ function ImportModal({ C, onClose, onApply }) {
 
 function StatCard({ C, label, value, caption, color }) {
   return (
-    <div style={{ flex: "1 1 160px", minWidth: 140, background: C.surface, border: `1px solid ${C.borderSoft}`, borderRadius: 10, padding: "14px 16px" }}>
+    <div style={{ flex: "1 1 160px", minWidth: 140, background: C.surface, border: `1px solid ${C.borderSoft}`, borderRadius: 10, padding: "14px 16px" }} className="fliipa-stat">
       <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: C.textMuted, marginBottom: 8 }}>
         {label}
       </div>
@@ -2843,6 +2933,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={task.title || "Detalle de la tarea"}
+        className="fliipa-drawer"
         style={{
           width: "min(420px, 100%)",
           height: "100%",
@@ -3256,6 +3347,7 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="fliipa-modal-pad"
         style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 440, padding: 20, maxHeight: "90vh", overflowY: "auto" }}
       >
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 16 }}>Nueva tarea</div>
