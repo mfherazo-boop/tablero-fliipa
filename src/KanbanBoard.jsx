@@ -453,6 +453,8 @@ export default function KanbanBoard() {
   const [saving, setSaving] = useState(false);
   const [typeFilter, setTypeFilter] = useState(null);
   const [assigneeFilter, setAssigneeFilter] = useState("Todos");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [initiativeFilter, setInitiativeFilter] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -774,12 +776,30 @@ export default function KanbanBoard() {
   }, [tasks, initiativeFilter]);
 
   const filtered = useMemo(() => {
-    return scopedTasks.filter(
-      (t) =>
-        (!typeFilter || t.type === typeFilter) &&
-        (assigneeFilter === "Todos" || t.assignee === assigneeFilter)
-    );
-  }, [scopedTasks, typeFilter, assigneeFilter]);
+    const today = new Date().toISOString().slice(0, 10);
+    return scopedTasks.filter((t) => {
+      if (typeFilter && t.type !== typeFilter) return false;
+      if (assigneeFilter !== "Todos" && t.assignee !== assigneeFilter) return false;
+      if (overdueOnly && !(t.dueDate && t.dueDate < today && t.status !== "done")) return false;
+      if (unassignedOnly && t.assignee) return false;
+      return true;
+    });
+  }, [scopedTasks, typeFilter, assigneeFilter, overdueOnly, unassignedOnly]);
+
+  const boardFiltersActive =
+    initiativeFilter ||
+    typeFilter ||
+    assigneeFilter !== "Todos" ||
+    overdueOnly ||
+    unassignedOnly;
+
+  function clearBoardFilters() {
+    setInitiativeFilter(null);
+    setTypeFilter(null);
+    setAssigneeFilter("Todos");
+    setOverdueOnly(false);
+    setUnassignedOnly(false);
+  }
 
   const initiativeStats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1019,16 +1039,22 @@ export default function KanbanBoard() {
               />
             </div>
 
-            {initiatives.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textFaint, marginBottom: 8 }}>
-                  Iniciativa
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div
+              style={{
+                background: C.surface,
+                border: `1px solid ${C.borderSoft}`,
+                borderRadius: 14,
+                padding: "14px 16px 16px",
+                marginBottom: 18,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+                <div style={rowLabel(C)}>Iniciativa</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
                   <FilterChip
                     C={C}
                     active={!initiativeFilter}
-                    label={`Todas (${tasks.length})`}
+                    label={`Todas ${tasks.length}`}
                     onClick={() => setInitiativeFilter(null)}
                   />
                   {initiativeStats.map((ini) => (
@@ -1043,57 +1069,92 @@ export default function KanbanBoard() {
                   ))}
                 </div>
               </div>
-            )}
 
-            {selectedInitiative && (
               <div
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
                   alignItems: "center",
+                  justifyContent: "space-between",
                   gap: 12,
                   flexWrap: "wrap",
-                  marginBottom: 14,
-                  padding: "12px 14px",
-                  background: C.surface,
-                  border: `1px solid ${C.borderSoft}`,
-                  borderRadius: 10,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  <span
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
+                  <div style={rowLabel(C)}>Filtros</div>
+                  <select
+                    value={assigneeFilter}
+                    onChange={(e) => setAssigneeFilter(e.target.value)}
+                    style={filterSelect(C, assigneeFilter !== "Todos")}
+                  >
+                    {assignees.map((a) => (
+                      <option key={a} value={a}>
+                        {a === "Todos" ? "Responsable" : a}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={typeFilter || ""}
+                    onChange={(e) => setTypeFilter(e.target.value || null)}
+                    style={filterSelect(C, !!typeFilter)}
+                  >
+                    <option value="">Etiqueta</option>
+                    {Object.entries(TASK_TYPES).map(([key, val]) => (
+                      <option key={key} value={key}>
+                        {val.label}
+                      </option>
+                    ))}
+                  </select>
+                  <FilterChip C={C} active={overdueOnly} label="Solo vencidas" onClick={() => setOverdueOnly((v) => !v)} />
+                  <FilterChip C={C} active={unassignedOnly} label="Solo sin asignar" onClick={() => setUnassignedOnly((v) => !v)} />
+                  <button
+                    onClick={clearBoardFilters}
+                    disabled={!boardFiltersActive}
                     style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 3,
-                      background: initiativeColor(selectedInitiative),
-                      flexShrink: 0,
+                      background: "none",
+                      border: "none",
+                      color: boardFiltersActive ? C.textMuted : C.textFaint,
+                      cursor: boardFiltersActive ? "pointer" : "default",
+                      fontSize: 13,
+                      padding: "6px 8px",
                     }}
-                  />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 600 }}>{selectedInitiative.title}</div>
-                    <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 2 }}>
-                      Tablero de esta iniciativa
-                      {selectedInitiative.owner ? ` · ${selectedInitiative.owner}` : ""}
-                    </div>
-                  </div>
+                  >
+                    Limpiar
+                  </button>
+                  {tasks.length === 0 && (
+                    <button
+                      onClick={resetToDemoData}
+                      style={{
+                        background: "none",
+                        border: `1px solid ${C.border}`,
+                        color: C.accent,
+                        borderRadius: 6,
+                        padding: "3px 9px",
+                        fontSize: 12.5,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Restaurar datos de ejemplo
+                    </button>
+                  )}
                 </div>
                 <button
-                  onClick={() => setInitiativeFilter(null)}
+                  onClick={() => setModalOpen(true)}
                   style={{
-                    background: "none",
-                    border: `1px solid ${C.border}`,
-                    color: C.textMuted,
-                    borderRadius: 6,
-                    padding: "6px 10px",
-                    fontSize: 12.5,
+                    background: C.accent,
+                    color: C.onAccent,
+                    border: "none",
+                    borderRadius: 20,
+                    padding: "10px 16px",
+                    fontSize: 14,
+                    fontWeight: 700,
                     cursor: "pointer",
+                    flexShrink: 0,
                   }}
                 >
-                  Ver todas
+                  Nueva tarea
                 </button>
               </div>
-            )}
+            </div>
 
             {selectedInitiative && scopedTasks.length === 0 && (
               <div
@@ -1112,60 +1173,6 @@ export default function KanbanBoard() {
                 <strong style={{ color: C.text }}>Nueva tarea</strong> y se asignará aquí.
               </div>
             )}
-
-            {/* Header de acción */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-end",
-                flexWrap: "wrap",
-                gap: 16,
-                marginBottom: 22,
-              }}
-            >
-              <div style={{ color: C.textMuted, fontSize: 13.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <span>
-                  {filtered.length} tarea{filtered.length !== 1 ? "s" : ""} visible
-                  {filtered.length !== 1 ? "s" : ""}
-                  {boardInitiatives.length > 0
-                    ? ` · ${boardInitiatives.length} iniciativa${boardInitiatives.length !== 1 ? "s" : ""} en el tablero`
-                    : ""}
-                  {" · "}el equipo ve el mismo tablero en este link
-                </span>
-                {tasks.length === 0 && (
-                  <button
-                    onClick={resetToDemoData}
-                    style={{
-                      background: "none",
-                      border: `1px solid ${C.border}`,
-                      color: C.accent,
-                      borderRadius: 6,
-                      padding: "3px 9px",
-                      fontSize: 12.5,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Restaurar datos de ejemplo
-                  </button>
-                )}
-              </div>
-              <button
-                onClick={() => setModalOpen(true)}
-                style={{
-                  background: C.accent,
-                  color: C.onAccent,
-                  border: "none",
-                  borderRadius: 20,
-                  padding: "10px 16px",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                Nueva tarea
-              </button>
-            </div>
 
             {error && error !== "no-storage" && (
               <div
@@ -1232,40 +1239,6 @@ export default function KanbanBoard() {
                 Este visor no tiene guardado activado — los cambios que hagas aquí no se guardarán al recargar la página.
               </div>
             )}
-
-            {/* Filtros */}
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 20 }}>
-              <FilterChip C={C} active={typeFilter === null} label="Todos los tipos" onClick={() => setTypeFilter(null)} />
-              {Object.entries(TASK_TYPES).map(([key, val]) => (
-                <FilterChip
-                  key={key}
-                  C={C}
-                  active={typeFilter === key}
-                  label={val.label}
-                  dotColor={val.color}
-                  onClick={() => setTypeFilter(typeFilter === key ? null : key)}
-                />
-              ))}
-              <div style={{ width: 1, height: 22, background: C.border, margin: "0 4px" }} />
-              <select
-                value={assigneeFilter}
-                onChange={(e) => setAssigneeFilter(e.target.value)}
-                style={{
-                  background: C.surface,
-                  border: `1px solid ${C.border}`,
-                  color: C.text,
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                  fontSize: 13.5,
-                }}
-              >
-                {assignees.map((a) => (
-                  <option key={a} value={a}>
-                    {a === "Todos" ? "Todos los responsables" : a}
-                  </option>
-                ))}
-              </select>
-            </div>
 
             {/* Tablero */}
             <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
@@ -2449,6 +2422,32 @@ function StatCard({ C, label, value, caption, color }) {
   );
 }
 
+function rowLabel(C) {
+  return {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: C.textFaint,
+    paddingTop: 8,
+    minWidth: 78,
+    flexShrink: 0,
+  };
+}
+
+function filterSelect(C, filled) {
+  return {
+    background: C.surfaceRaised,
+    border: `1px solid ${C.border}`,
+    color: filled ? C.text : C.textMuted,
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 13,
+    cursor: "pointer",
+    minWidth: 140,
+  };
+}
+
 function FilterChip({ C, active, label, onClick, dotColor }) {
   return (
     <button
@@ -2497,7 +2496,7 @@ function InitiativeBoardCard({ C, initiative, taskCount, progress, dragging, onD
             fontSize: 11,
             fontWeight: 700,
             color: C.onAccent,
-            background: C.accent,
+            background: color,
             borderRadius: 20,
             padding: "2px 8px",
             maxWidth: 170,
@@ -2545,6 +2544,7 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
   const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
   const today = new Date().toISOString().slice(0, 10);
   const isOverdue = task.dueDate && task.dueDate < today && task.status !== "done";
+  const iniColor = initiative ? initiativeColor(initiative) : typeMeta.color;
   const shortIni = initiative ? initiative.title : null;
   return (
     <div
@@ -2578,7 +2578,7 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
               fontSize: 11,
               fontWeight: 700,
               color: C.onAccent,
-              background: C.accent,
+              background: iniColor,
               borderRadius: 20,
               padding: "2px 8px",
               maxWidth: 148,
@@ -2588,7 +2588,6 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
               flexShrink: 1,
             }}
           >
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.onAccent, opacity: 0.55, flexShrink: 0 }} />
             {shortIni || typeMeta.label}
           </span>
           <span style={{ fontSize: 12, color: C.textFaint, flexShrink: 0 }}>#{taskNumber(task)}</span>
