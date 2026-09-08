@@ -70,6 +70,18 @@ function initiativeColumn(ini) {
   return COLUMNS.some((c) => c.id === status) ? status : "backlog";
 }
 
+function taskStageProgress(status) {
+  const idx = COLUMNS.findIndex((c) => c.id === status);
+  if (idx < 0) return 0;
+  return Math.round((idx / (COLUMNS.length - 1)) * 100);
+}
+
+function weightedInitiativeProgress(related, fallback) {
+  if (!related || related.length === 0) return Math.max(0, Math.min(100, Number(fallback) || 0));
+  const sum = related.reduce((acc, t) => acc + taskStageProgress(t.status), 0);
+  return Math.round(sum / related.length);
+}
+
 const TASKS_KEY = "fliipa-kanban:tasks";
 const THEME_KEY = "fliipa-kanban:theme";
 const INITIATIVES_KEY = "fliipa-kanban:initiatives";
@@ -770,7 +782,7 @@ export default function KanbanBoard() {
         vencidas: related.filter((t) => t.dueDate && t.dueDate < today && t.status !== "done").length,
         sinAsignar: related.filter((t) => !t.assignee).length,
         closed: done,
-        progress: related.length ? Math.round((done / related.length) * 100) : Number(ini.progress) || 0,
+        progress: weightedInitiativeProgress(related, ini.progress),
       };
     });
   }, [initiatives, tasks]);
@@ -1271,6 +1283,7 @@ export default function KanbanBoard() {
                           C={C}
                           initiative={ini}
                           taskCount={(initiativeStats.find((s) => idsMatch(s.id, ini.id)) || {}).taskCount || 0}
+                          progress={(initiativeStats.find((s) => idsMatch(s.id, ini.id)) || {}).progress || 0}
                           dragging={draggingKind === "initiative" && draggingId === ini.id}
                           onDragStart={() => {
                             setDraggingKind("initiative");
@@ -1692,7 +1705,7 @@ function InitiativesView({
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Iniciativas estratégicas de Fliipa</div>
           <div style={{ fontSize: 13, color: C.textMuted }}>
-            % de avance = tareas hechas sobre el total de la iniciativa. Clic en una fila abre su tablero.
+            % de avance sube al mover las tareas de columna (Backlog 0% → Por hacer 25% → En progreso 50% → En revisión 75% → Hecho 100%). Clic en una fila abre su tablero.
           </div>
         </div>
         <button
@@ -1851,7 +1864,7 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen }) {
       <div style={{ fontSize: 13, color: C.textMuted }}>{initiative.sinAsignar || 0}</div>
       <div>
         <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>
-          {initiative.closed || 0} de {initiative.taskCount || 0} hechas · {initiative.progress || 0}%
+          {initiative.progress || 0}% · {initiative.closed || 0} de {initiative.taskCount || 0} en Hecho
         </div>
         <div style={{ height: 6, background: C.surfaceRaised, borderRadius: 3, overflow: "hidden" }}>
           <div style={{ width: `${initiative.progress || 0}%`, height: "100%", background: color }} />
@@ -2108,8 +2121,9 @@ function FilterChip({ C, active, label, onClick, dotColor }) {
   );
 }
 
-function InitiativeBoardCard({ C, initiative, taskCount, dragging, onDragStart, onDragEnd, onOpen }) {
+function InitiativeBoardCard({ C, initiative, taskCount, progress, dragging, onDragStart, onDragEnd, onOpen }) {
   const color = initiativeColor(initiative);
+  const pct = Math.max(0, Math.min(100, Number(progress) || 0));
   return (
     <div
       draggable
@@ -2153,7 +2167,7 @@ function InitiativeBoardCard({ C, initiative, taskCount, dragging, onDragStart, 
           background: C.surface,
           borderRadius: 8,
           padding: "7px 9px",
-          marginBottom: 12,
+          marginBottom: 10,
           color: C.textMuted,
           fontSize: 12,
         }}
@@ -2161,8 +2175,14 @@ function InitiativeBoardCard({ C, initiative, taskCount, dragging, onDragStart, 
         <span style={{ opacity: 0.7 }}>◇</span>
         {taskCount} tarea{taskCount !== 1 ? "s" : ""}
       </div>
-      <div style={{ fontSize: 12.5, color: initiative.owner ? C.text : C.textMuted, fontStyle: initiative.owner ? "normal" : "italic" }}>
-        {initiative.owner || "Sin asignar"}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, color: initiative.owner ? C.text : C.textMuted, fontStyle: initiative.owner ? "normal" : "italic" }}>
+          {initiative.owner || "Sin asignar"}
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 700, color }}>{pct}%</span>
+      </div>
+      <div style={{ height: 6, background: C.surface, borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color }} />
       </div>
     </div>
   );
