@@ -883,6 +883,10 @@ export default function KanbanBoard() {
           outline: 2px solid ${C.accent};
           outline-offset: 2px;
         }
+        @keyframes fliipaDrawerIn {
+          from { transform: translateX(24px); opacity: 0.4; }
+          to { transform: translateX(0); opacity: 1; }
+        }
         @media (prefers-reduced-motion: reduce) {
           * { transition: none !important; animation: none !important; }
         }
@@ -1260,6 +1264,7 @@ export default function KanbanBoard() {
                           key={task.id}
                           C={C}
                           task={task}
+                          selected={openTaskId === task.id}
                           dragging={draggingKind !== "initiative" && draggingId === task.id}
                           onDragStart={() => {
                             setDraggingKind("task");
@@ -2115,7 +2120,7 @@ function InitiativeBoardCard({ C, initiative, taskCount, dragging, onDragStart, 
   );
 }
 
-function TaskCard({ C, task, dragging, onDragStart, onDragEnd, onMoveLeft, onMoveRight, onDelete, onToggleBlocked, onOpen, initiative }) {
+function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveLeft, onMoveRight, onDelete, onToggleBlocked, onOpen, initiative }) {
   const [hover, setHover] = useState(false);
   const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
   const today = new Date().toISOString().slice(0, 10);
@@ -2133,12 +2138,13 @@ function TaskCard({ C, task, dragging, onDragStart, onDragEnd, onMoveLeft, onMov
       onMouseLeave={() => setHover(false)}
       style={{
         background: C.surfaceRaised,
-        border: `1px solid ${C.borderSoft}`,
+        border: `1px solid ${selected ? C.accent : C.borderSoft}`,
         borderLeft: `3px solid ${typeMeta.color}`,
         borderRadius: 9,
         padding: "10px 11px",
         cursor: dragging ? "grabbing" : "pointer",
         opacity: dragging ? 0.4 : 1,
+        boxShadow: selected ? `0 0 0 1px ${C.accent}` : "none",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
@@ -2305,7 +2311,6 @@ function arrowStyle(C) {
 }
 
 function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onDelete, onOpenAttachment }) {
-  const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title || "");
   const [description, setDescription] = useState(task.description || "");
   const [initiativeId, setInitiativeId] = useState(task.initiativeId || "");
@@ -2322,11 +2327,10 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
   const [blocked, setBlocked] = useState(!!task.blocked);
   const fileInputRef = useRef(null);
   const useCustom = assignee === "__custom__";
-  const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
-  const columnLabel = (COLUMNS.find((c) => c.id === task.status) || {}).label || task.status;
+  const linkedInitiative = (initiatives || []).find((i) => idsMatch(i.id, task.initiativeId));
   const ownerOptions = Array.from(new Set([...(assignees || []), task.assignee].filter(Boolean)));
 
-  function startEdit() {
+  useEffect(() => {
     setTitle(task.title || "");
     setDescription(task.description || "");
     setInitiativeId(task.initiativeId || "");
@@ -2339,8 +2343,15 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
     setStatus(task.status || "backlog");
     setDueDate(task.dueDate || "");
     setBlocked(!!task.blocked);
-    setEditing(true);
-  }
+  }, [task.id]);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   async function addFiles(fileList) {
     const files = Array.from(fileList || []);
@@ -2364,8 +2375,12 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
     if (next.length) setPending((prev) => [...prev, ...next].slice(0, Math.max(0, MAX_ATTACHMENTS - attachments.length)));
   }
 
-  async function handleSave() {
-    if (!title.trim() || saving) return;
+  function patchField(partial) {
+    onSave(partial);
+  }
+
+  async function handleSaveNotes() {
+    if (saving) return;
     const finalAssignee = useCustom ? customAssignee.trim() : assignee === "__none__" ? "" : assignee.trim();
     setSaving(true);
     setAttachError(null);
@@ -2373,7 +2388,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
       const uploaded = [];
       for (const item of pending) uploaded.push(await uploadPending(item));
       onSave({
-        title: title.trim(),
+        title: title.trim() || task.title,
         description: description.trim(),
         initiativeId: initiativeId || null,
         attachments: [...attachments, ...uploaded],
@@ -2384,13 +2399,21 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
         blocked,
       });
       setPending([]);
-      setEditing(false);
       setSaving(false);
     } catch (e) {
       setAttachError("No se pudieron guardar los cambios. Intenta de nuevo.");
       setSaving(false);
     }
   }
+
+  const history = [];
+  if (task.createdAt) history.push({ t: task.createdAt, text: "Tarea creada" });
+  if (task.statusChangedAt && task.statusChangedAt !== task.createdAt) {
+    const col = (COLUMNS.find((c) => c.id === task.status) || {}).label || task.status;
+    history.push({ t: task.statusChangedAt, text: `Estado actualizado a ${col}` });
+  }
+  if (task.planeMigratedAt) history.push({ t: task.planeMigratedAt, text: "Migrada a Plane" });
+  history.sort((a, b) => b.t - a.t);
 
   const label = labelStyle(C);
   const input = inputStyle(C);
@@ -2400,256 +2423,349 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
   return (
     <div
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(8,10,14,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(8,10,14,0.28)",
+        display: "flex",
+        justifyContent: "flex-end",
+        zIndex: 50,
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 480, padding: 20, maxHeight: "90vh", overflowY: "auto" }}
+        role="dialog"
+        aria-label={task.title || "Detalle de la tarea"}
+        style={{
+          width: "min(420px, 100%)",
+          height: "100%",
+          background: C.surface,
+          borderLeft: `1px solid ${C.border}`,
+          boxShadow: "-12px 0 40px rgba(0,0,0,0.28)",
+          overflowY: "auto",
+          padding: "18px 20px 28px",
+          animation: "fliipaDrawerIn 180ms ease-out",
+        }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600 }}>
-            {editing ? "Editar tarea" : "Detalle de la tarea"}
-          </div>
-          {!editing && (
-            <button onClick={startEdit} style={primary}>
-              Editar
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+          <textarea
+            value={title}
+            rows={2}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => {
+              if (title.trim() && title.trim() !== task.title) patchField({ title: title.trim() });
+            }}
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              color: C.text,
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: 18,
+              fontWeight: 600,
+              lineHeight: 1.3,
+              padding: 0,
+              outline: "none",
+              resize: "none",
+              overflow: "hidden",
+            }}
+          />
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textFaint,
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              padding: 4,
+              flexShrink: 0,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          {linkedInitiative && (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: initiativeColor(linkedInitiative),
+                background: C.surfaceRaised,
+                border: `1px solid ${C.borderSoft}`,
+                borderRadius: 20,
+                padding: "2px 9px",
+              }}
+            >
+              {linkedInitiative.title}
+            </span>
+          )}
+          {task.blocked && <span style={{ fontSize: 11, color: C.textFaint }}>Bloqueada</span>}
+        </div>
+
+        <label style={label}>Estado</label>
+        <select
+          value={status}
+          onChange={(e) => {
+            const next = e.target.value;
+            setStatus(next);
+            patchField({ status: next });
+          }}
+          style={input}
+        >
+          {COLUMNS.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+
+        <label style={label}>Responsable</label>
+        <select
+          value={assignee}
+          onChange={(e) => {
+            const next = e.target.value;
+            setAssignee(next);
+            if (next !== "__custom__") patchField({ assignee: next === "__none__" ? "" : next });
+          }}
+          style={input}
+        >
+          <option value="__none__">Sin asignar</option>
+          {ownerOptions.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+          <option value="__custom__">Otro…</option>
+        </select>
+        {useCustom && (
+          <input
+            value={customAssignee}
+            onChange={(e) => setCustomAssignee(e.target.value)}
+            onBlur={() => {
+              if (customAssignee.trim()) patchField({ assignee: customAssignee.trim() });
+            }}
+            placeholder="Nombre del responsable"
+            style={{ ...input, marginTop: 8 }}
+          />
+        )}
+
+        <label style={label}>Fecha de vencimiento</label>
+        <input
+          type="date"
+          value={dueDate || ""}
+          onChange={(e) => {
+            const next = e.target.value;
+            setDueDate(next);
+            patchField({ dueDate: next || null });
+          }}
+          style={input}
+        />
+
+        <label style={label}>Etiqueta</label>
+        <select
+          value={type}
+          onChange={(e) => {
+            const next = e.target.value;
+            setType(next);
+            patchField({ type: next });
+          }}
+          style={input}
+        >
+          {Object.entries(TASK_TYPES).map(([key, val]) => (
+            <option key={key} value={key}>
+              {val.label}
+            </option>
+          ))}
+        </select>
+
+        <label style={label}>Iniciativa</label>
+        <select
+          value={initiativeId}
+          onChange={(e) => {
+            const next = e.target.value;
+            setInitiativeId(next);
+            patchField({ initiativeId: next || null });
+          }}
+          style={input}
+        >
+          <option value="">Sin iniciativa</option>
+          {(initiatives || []).map((ini) => (
+            <option key={ini.id} value={ini.id}>
+              {ini.title}
+            </option>
+          ))}
+        </select>
+
+        <label style={label}>Notas</label>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDropActive(true);
+          }}
+          onDragLeave={() => setDropActive(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDropActive(false);
+            addFiles(e.dataTransfer.files);
+          }}
+          style={{
+            border: `1px dashed ${dropActive ? C.accent : C.border}`,
+            borderRadius: 8,
+            padding: 8,
+            background: dropActive ? C.surfaceRaised : "transparent",
+          }}
+        >
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={6}
+            placeholder="Notas de la tarea. Arrastra aquí imágenes o documentos."
+            style={{ ...input, resize: "vertical", minHeight: 120, margin: 0, border: "none", background: "transparent" }}
+          />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "0 2px 2px" }}>
+            <span style={{ fontSize: 11.5, color: C.textFaint }}>Imágenes o documentos · máx. 1.5 MB · 5 archivos</span>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              style={{
+                background: C.surfaceRaised,
+                border: `1px solid ${C.border}`,
+                color: C.text,
+                borderRadius: 7,
+                padding: "6px 10px",
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              Adjuntar
             </button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ATTACH_ACCEPT}
+            multiple
+            hidden
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          {[...attachments, ...pending].length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+              {attachments.map((item) => (
+                <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, background: C.surfaceRaised, borderRadius: 8, padding: "6px 8px" }}>
+                  {item.isImage && item.thumb ? (
+                    <img
+                      src={item.thumb}
+                      alt=""
+                      onClick={() => onOpenAttachment && onOpenAttachment(item)}
+                      style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5, cursor: "pointer" }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 16, width: 36, textAlign: "center", cursor: "pointer" }} onClick={() => onOpenAttachment && onOpenAttachment(item)}>
+                      📄
+                    </span>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                  <button
+                    type="button"
+                    aria-label="Quitar adjunto"
+                    onClick={() => setAttachments((prev) => prev.filter((a) => a.id !== item.id))}
+                    style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer" }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {pending.map((item) => (
+                <div key={item.localId} style={{ display: "flex", alignItems: "center", gap: 8, background: C.surfaceRaised, borderRadius: 8, padding: "6px 8px" }}>
+                  {item.isImage && (item.thumb || item.data) ? (
+                    <img src={item.thumb || item.data} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5 }} />
+                  ) : (
+                    <span style={{ fontSize: 16, width: 36, textAlign: "center" }}>📄</span>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                    <div style={{ fontSize: 11, color: C.textFaint }}>Nuevo · {formatBytes(item.size)}</div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Quitar adjunto"
+                    onClick={() => setPending((prev) => prev.filter((p) => p.localId !== item.localId))}
+                    style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer" }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {attachError && <div style={{ fontSize: 12.5, color: C.danger, marginTop: 8 }}>{attachError}</div>}
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: C.textMuted, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={blocked}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setBlocked(next);
+              patchField({ blocked: next });
+            }}
+          />
+          Marcar como bloqueada
+        </label>
+
+        <button
+          onClick={handleSaveNotes}
+          style={{ ...primary, width: "100%", marginTop: 16, padding: "10px 14px", opacity: saving ? 0.7 : 1 }}
+          disabled={saving}
+        >
+          {saving ? "Guardando…" : "Guardar notas"}
+        </button>
+
+        <div style={{ fontSize: 12, color: C.textFaint, marginTop: 14 }}>
+          Actualizada {formatUpdated(task.updatedAt || task.statusChangedAt || task.createdAt || Date.now())}
+        </div>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.borderSoft}` }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: C.textFaint,
+              marginBottom: 10,
+            }}
+          >
+            Historial
+          </div>
+          {history.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: C.textFaint }}>Sin eventos todavía</div>
+          ) : (
+            history.map((item, idx) => (
+              <div key={idx} style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 8, lineHeight: 1.4 }}>
+                {item.text}
+                <div style={{ fontSize: 11.5, color: C.textFaint }}>{formatUpdated(item.t)}</div>
+              </div>
+            ))
           )}
         </div>
 
-        {!editing ? (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-              {task.initiativeId && (initiatives || []).find((i) => i.id === task.initiativeId) && (
-                <span style={{ fontSize: 12, fontWeight: 600, color: initiativeColor((initiatives || []).find((i) => i.id === task.initiativeId)) }}>
-                  {(initiatives || []).find((i) => i.id === task.initiativeId).title}
-                </span>
-              )}
-              <span style={{ fontSize: 12, fontWeight: 600, color: typeMeta.color }}>{typeMeta.label}</span>
-              {task.blocked && <span style={{ fontSize: 11, color: C.textFaint }}>Bloqueada</span>}
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 10 }}>{task.title}</div>
-            {task.description ? (
-              <div style={{ fontSize: 13.5, lineHeight: 1.5, color: C.textMuted, whiteSpace: "pre-wrap", marginBottom: 14 }}>
-                {task.description}
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: C.textFaint, marginBottom: 14 }}>Sin descripción</div>
-            )}
-            {Array.isArray(task.attachments) && task.attachments.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-                {task.attachments.map((att) => (
-                  <button
-                    key={att.id}
-                    type="button"
-                    onClick={() => onOpenAttachment && onOpenAttachment(att)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      background: C.surfaceRaised,
-                      border: `1px solid ${C.borderSoft}`,
-                      borderRadius: 8,
-                      padding: 8,
-                      color: C.text,
-                      cursor: "pointer",
-                      textAlign: "left",
-                    }}
-                  >
-                    {att.isImage && att.thumb ? (
-                      <img src={att.thumb} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6 }} />
-                    ) : (
-                      <span style={{ fontSize: 18, width: 40, textAlign: "center" }}>📄</span>
-                    )}
-                    <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <div style={{ fontSize: 13, color: C.textMuted, display: "flex", flexDirection: "column", gap: 6, marginBottom: 18 }}>
-              <div>Responsable: {task.assignee || "Sin asignar"}</div>
-              <div>Columna: {columnLabel}</div>
-              <div>Fecha límite: {task.dueDate || "Sin fecha"}</div>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-              <button
-                onClick={onDelete}
-                style={{ ...ghost, color: C.danger, borderColor: C.danger }}
-              >
-                Eliminar
-              </button>
-              <button onClick={onClose} style={ghost}>
-                Cerrar
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <label style={label}>Título</label>
-            <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} style={input} />
-
-            <label style={label}>Iniciativa</label>
-            <select value={initiativeId} onChange={(e) => setInitiativeId(e.target.value)} style={input}>
-              <option value="">Sin iniciativa</option>
-              {(initiatives || []).map((ini) => (
-                <option key={ini.id} value={ini.id}>
-                  {ini.title}
-                </option>
-              ))}
-            </select>
-
-            <label style={label}>Descripción</label>
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDropActive(true);
-              }}
-              onDragLeave={() => setDropActive(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDropActive(false);
-                addFiles(e.dataTransfer.files);
-              }}
-              style={{
-                border: `1px dashed ${dropActive ? C.accent : C.border}`,
-                borderRadius: 8,
-                padding: 8,
-                background: dropActive ? C.surfaceRaised : "transparent",
-              }}
-            >
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={4}
-                placeholder="Detalles, contexto o criterios de la tarea (opcional). Arrastra aquí imágenes o documentos."
-                style={{ ...input, resize: "vertical", minHeight: 88, margin: 0, border: "none", background: "transparent" }}
-              />
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "0 2px 2px" }}>
-                <span style={{ fontSize: 11.5, color: C.textFaint }}>Imágenes o documentos · máx. 1.5 MB · 5 archivos</span>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                  style={{
-                    background: C.surfaceRaised,
-                    border: `1px solid ${C.border}`,
-                    color: C.text,
-                    borderRadius: 7,
-                    padding: "6px 10px",
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Adjuntar
-                </button>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={ATTACH_ACCEPT}
-                multiple
-                hidden
-                onChange={(e) => {
-                  addFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-              {[...attachments, ...pending].length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                  {attachments.map((item) => (
-                    <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 8, background: C.surfaceRaised, borderRadius: 8, padding: "6px 8px" }}>
-                      {item.isImage && item.thumb ? (
-                        <img src={item.thumb} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5 }} />
-                      ) : (
-                        <span style={{ fontSize: 16, width: 36, textAlign: "center" }}>📄</span>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
-                      <button
-                        type="button"
-                        aria-label="Quitar adjunto"
-                        onClick={() => setAttachments((prev) => prev.filter((a) => a.id !== item.id))}
-                        style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer" }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  {pending.map((item) => (
-                    <div key={item.localId} style={{ display: "flex", alignItems: "center", gap: 8, background: C.surfaceRaised, borderRadius: 8, padding: "6px 8px" }}>
-                      {item.isImage && (item.thumb || item.data) ? (
-                        <img src={item.thumb || item.data} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5 }} />
-                      ) : (
-                        <span style={{ fontSize: 16, width: 36, textAlign: "center" }}>📄</span>
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
-                        <div style={{ fontSize: 11, color: C.textFaint }}>Nuevo · {formatBytes(item.size)}</div>
-                      </div>
-                      <button
-                        type="button"
-                        aria-label="Quitar adjunto"
-                        onClick={() => setPending((prev) => prev.filter((p) => p.localId !== item.localId))}
-                        style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer" }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {attachError && <div style={{ fontSize: 12.5, color: C.danger, marginTop: 8 }}>{attachError}</div>}
-
-            <label style={label}>Tipo</label>
-            <select value={type} onChange={(e) => setType(e.target.value)} style={input}>
-              {Object.entries(TASK_TYPES).map(([key, val]) => (
-                <option key={key} value={key}>
-                  {val.label}
-                </option>
-              ))}
-            </select>
-
-            <label style={label}>Responsable</label>
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} style={input}>
-              <option value="__none__">Sin asignar</option>
-              {ownerOptions.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-              <option value="__custom__">Otro…</option>
-            </select>
-            {useCustom && (
-              <input value={customAssignee} onChange={(e) => setCustomAssignee(e.target.value)} placeholder="Nombre del responsable" style={{ ...input, marginTop: 8 }} />
-            )}
-
-            <label style={label}>Columna</label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} style={input}>
-              {COLUMNS.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-
-            <label style={label}>Fecha límite (opcional)</label>
-            <input type="date" value={dueDate || ""} onChange={(e) => setDueDate(e.target.value)} style={input} />
-
-            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: C.textMuted, cursor: "pointer" }}>
-              <input type="checkbox" checked={blocked} onChange={(e) => setBlocked(e.target.checked)} />
-              Marcar como bloqueada
-            </label>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-              <button onClick={() => setEditing(false)} style={ghost} disabled={saving}>
-                Cancelar
-              </button>
-              <button onClick={handleSave} style={{ ...primary, opacity: saving ? 0.7 : 1 }} disabled={saving}>
-                {saving ? "Guardando…" : "Guardar cambios"}
-              </button>
-            </div>
-          </>
-        )}
+        <button
+          onClick={onDelete}
+          style={{ ...ghost, color: C.danger, borderColor: C.danger, marginTop: 18, width: "100%" }}
+        >
+          Eliminar tarea
+        </button>
       </div>
     </div>
   );
