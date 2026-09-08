@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import PlaneMigrateModal from "./PlaneMigrateModal";
 
 // ---- Design tokens ----
 // Two palettes so the dark-mode toggle in the top bar actually re-themes
@@ -395,6 +396,7 @@ export default function KanbanBoard() {
   const [importOpen, setImportOpen] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const [openTaskId, setOpenTaskId] = useState(null);
+  const [planeOpen, setPlaneOpen] = useState(false);
   const [initiatives, setInitiatives] = useState([]);
   const [deletedTaskIds, setDeletedTaskIds] = useState({});
   const [deletedInitIds, setDeletedInitIds] = useState({});
@@ -721,6 +723,17 @@ export default function KanbanBoard() {
     setModalOpen(false);
   }
 
+  function updateInitiative(id, patch) {
+    const now = Date.now();
+    setInitiatives((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch, updatedAt: now } : i)));
+  }
+
+  function markPlaneItem({ kind, id, planeWorkItemId }) {
+    const patch = { planeWorkItemId, planeMigratedAt: Date.now() };
+    if (kind === "initiative") updateInitiative(id, patch);
+    else updateTask(id, patch);
+  }
+
   function updateTask(id, patch) {
     const now = Date.now();
     setTasks((prev) =>
@@ -810,6 +823,7 @@ export default function KanbanBoard() {
         syncStatus={saving ? "saving" : !error ? "ok" : error === "no-storage" ? "local" : "error"}
         onOpenExport={() => setExportOpen(true)}
         onOpenImport={() => setImportOpen(true)}
+        onOpenPlane={() => setPlaneOpen(true)}
       />
 
       <div style={{ padding: "22px 20px 40px" }}>
@@ -1110,6 +1124,16 @@ export default function KanbanBoard() {
           onOpenAttachment={setPreviewAttachment}
         />
       )}
+
+      {planeOpen && (
+        <PlaneMigrateModal
+          C={C}
+          tasks={tasks}
+          initiatives={initiatives}
+          onClose={() => setPlaneOpen(false)}
+          onItemMigrated={markPlaneItem}
+        />
+      )}
     </div>
   );
 }
@@ -1153,7 +1177,7 @@ async function copyShareLink(title) {
   }
 }
 
-function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport }) {
+function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenPlane }) {
   const [shareStatus, setShareStatus] = useState(null);
   const shareTimerRef = useRef(null);
 
@@ -1214,6 +1238,23 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
               </span>
             ))}
           </div>
+          <button
+            onClick={onOpenPlane}
+            style={{
+              background: "none",
+              border: `1px solid ${C.border}`,
+              color: C.text,
+              borderRadius: 6,
+              padding: "5px 10px",
+              cursor: "pointer",
+              fontSize: 12.5,
+              fontWeight: 600,
+            }}
+            aria-label="Migrar a Plane"
+            title="Migrar este tablero a Plane"
+          >
+            Plane
+          </button>
           <button
             onClick={onOpenExport}
             style={{
