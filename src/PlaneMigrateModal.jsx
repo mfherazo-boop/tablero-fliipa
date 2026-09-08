@@ -75,11 +75,11 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
   const primary = {
     background: C.accent,
     border: "none",
-    color: "#FFFFFF",
-    borderRadius: 8,
-    padding: "8px 14px",
+    color: C.onAccent || "#06251C",
+    borderRadius: 20,
+    padding: "8px 16px",
     fontSize: 13.5,
-    fontWeight: 600,
+    fontWeight: 700,
     cursor: "pointer",
   };
 

@@ -7,50 +7,58 @@ import PlaneMigrateModal from "./PlaneMigrateModal";
 function getColors(dark) {
   return dark
     ? {
-        bg: "#10131A",
-        surface: "#171B24",
-        surfaceRaised: "#1E232E",
-        border: "#2A303C",
-        borderSoft: "#232833",
-        text: "#E7E5DF",
-        textMuted: "#8B93A3",
-        textFaint: "#5C6373",
-        accent: "#3F8E8C",
-        danger: "#E2574C",
-        indigo: "#6D5DFC",
+        bg: "#0B0E1A",
+        surface: "#14192C",
+        surfaceRaised: "#1A2138",
+        border: "#2A3350",
+        borderSoft: "#222A42",
+        text: "#F4F6FB",
+        textMuted: "#9AA4C0",
+        textFaint: "#6B7594",
+        accent: "#3EE0B4",
+        onAccent: "#06251C",
+        accentSoft: "rgba(62,224,180,0.14)",
+        chipActiveBg: "#F4F6FB",
+        chipActiveText: "#06251C",
+        danger: "#F07178",
+        indigo: "#8B8CFF",
       }
     : {
-        bg: "#F7F8FA",
+        bg: "#F3F6FA",
         surface: "#FFFFFF",
-        surfaceRaised: "#F1F3F6",
-        border: "#E2E5EA",
-        borderSoft: "#EAEDF1",
-        text: "#1B1F27",
-        textMuted: "#5B6472",
-        textFaint: "#8A93A3",
-        accent: "#2F7A78",
+        surfaceRaised: "#EEF2F8",
+        border: "#D8DEEA",
+        borderSoft: "#E6EAF3",
+        text: "#12182A",
+        textMuted: "#5B6680",
+        textFaint: "#8A93A8",
+        accent: "#1FB894",
+        onAccent: "#06251C",
+        accentSoft: "rgba(31,184,148,0.12)",
+        chipActiveBg: "#1FB894",
+        chipActiveText: "#06251C",
         danger: "#D1453B",
-        indigo: "#5B4FE0",
+        indigo: "#6B74E8",
       };
 }
 
 const TASK_TYPES = {
   Bug: { color: "#E2574C", label: "Bug" },
-  Feature: { color: "#4C9F70", label: "Feature" },
+  Feature: { color: "#3EE0B4", label: "Feature" },
   Task: { color: "#4C7EF3", label: "Tarea" },
   Mejora: { color: "#B48EDE", label: "Mejora" },
 };
 
 const COLUMNS = [
-  { id: "backlog", label: "Backlog", dot: "#9AA3B2" },
-  { id: "todo", label: "Por hacer", dot: "#E7E5DF" },
-  { id: "in_progress", label: "En progreso", dot: "#8B7CFF" },
-  { id: "review", label: "En revisión", dot: "#B48EDE" },
-  { id: "done", label: "Hecho", dot: "#3FA66B" },
+  { id: "backlog", label: "Backlog", dot: "#C5CAD8" },
+  { id: "todo", label: "Por hacer", dot: "#8B8CFF" },
+  { id: "in_progress", label: "En progreso", dot: "#5B8CFF" },
+  { id: "review", label: "En revisión", dot: "#3EE0B4" },
+  { id: "done", label: "Hecho", dot: "#3EE0B4" },
 ];
 
 const ROSTER = ["Mafe", "William", "Alejo", "Aleja", "Fran", "Ivan"];
-const AVATAR_COLORS = ["#6D5DFC", "#4C7EF3", "#4C9F70", "#B48EDE", "#E2574C", "#3F8E8C"];
+const AVATAR_COLORS = ["#3EE0B4", "#8B8CFF", "#5B8CFF", "#F0C14B", "#F07178", "#B48EDE"];
 
 function initiativeColor(ini, index = 0) {
   if (ini && ini.color) return ini.color;
@@ -935,7 +943,7 @@ export default function KanbanBoard() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
-        html, body, #root { height: 100%; }
+        html, body, #root { height: 100%; background: ${C.bg}; }
         ::-webkit-scrollbar { height: 8px; width: 8px; }
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -997,16 +1005,17 @@ export default function KanbanBoard() {
                 }
                 value={stats.total}
                 caption={selectedInitiative ? "en la iniciativa" : "en total"}
+                color={C.accent}
               />
-              <StatCard C={C} label="Vencidas" value={stats.vencidas} caption="en total" color={C.danger} />
-              <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="en total" />
-              <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="en total" color={C.textFaint} />
+              <StatCard C={C} label="Vencidas" value={stats.vencidas} caption="en total" color={stats.vencidas ? C.danger : C.text} />
+              <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="en total" color={C.text} />
+              <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="en total" color={C.text} />
               <StatCard
                 C={C}
                 label="Cambio de estado · 7 días"
                 value={stats.cambioEstado}
                 caption="en total"
-                color={C.indigo}
+                color={C.accent}
               />
             </div>
 
@@ -1145,9 +1154,9 @@ export default function KanbanBoard() {
                 onClick={() => setModalOpen(true)}
                 style={{
                   background: C.accent,
-                  color: "#FFFFFF",
+                  color: C.onAccent,
                   border: "none",
-                  borderRadius: 8,
+                  borderRadius: 20,
                   padding: "10px 16px",
                   fontSize: 14,
                   fontWeight: 600,
@@ -1495,14 +1504,14 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
 
   const badge =
     syncStatus === "ok"
-      ? { label: "Sincronizado", color: "#3FA66B" }
+      ? { label: "Sincronizado", color: C.accent }
       : syncStatus === "saving"
       ? { label: "Guardando…", color: C.indigo }
       : syncStatus === "local"
       ? { label: "Sin guardado", color: C.textFaint }
       : { label: "Error al guardar", color: C.danger };
   return (
-    <div style={{ borderBottom: `1px solid ${C.borderSoft}`, background: C.surface }}>
+    <div style={{ borderBottom: `1px solid ${C.borderSoft}`, background: C.bg }}>
       {/* Fila 1: breadcrumb + avatares + compartir */}
       <div
         style={{
@@ -1684,7 +1693,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
               fontSize: 12.5,
               fontWeight: 600,
               color: badge.color,
-              background: syncStatus === "ok" ? (C.bg === "#10131A" ? "#12261C" : "#E8F6EE") : "transparent",
+              background: syncStatus === "ok" ? C.accentSoft : "transparent",
               borderRadius: 20,
               padding: "3px 10px",
             }}
@@ -1740,16 +1749,16 @@ function InitiativesView({
   return (
     <div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
-        <StatCard C={C} label="Tareas" value={(stats && stats.total) || 0} caption="en total" />
-        <StatCard C={C} label="Vencidas" value={(stats && stats.vencidas) || 0} caption="en total" color={C.danger} />
-        <StatCard C={C} label="Sin asignar" value={(stats && stats.sinAsignar) || 0} caption="en total" />
-        <StatCard C={C} label="Bloqueadas" value={(stats && stats.bloqueadas) || 0} caption="en total" color={C.textFaint} />
+        <StatCard C={C} label="Tareas" value={(stats && stats.total) || 0} caption="en total" color={C.accent} />
+        <StatCard C={C} label="Vencidas" value={(stats && stats.vencidas) || 0} caption="en total" color={(stats && stats.vencidas) ? C.danger : C.text} />
+        <StatCard C={C} label="Sin asignar" value={(stats && stats.sinAsignar) || 0} caption="en total" color={C.text} />
+        <StatCard C={C} label="Bloqueadas" value={(stats && stats.bloqueadas) || 0} caption="en total" color={C.text} />
         <StatCard
           C={C}
           label="Cambio de estado · 7 días"
           value={(stats && stats.cambioEstado) || 0}
           caption="en total"
-          color={C.indigo}
+          color={C.accent}
         />
       </div>
       <div
@@ -1772,9 +1781,9 @@ function InitiativesView({
           onClick={onOpenNew}
           style={{
             background: C.accent,
-            color: "#FFFFFF",
+            color: C.onAccent,
             border: "none",
-            borderRadius: 8,
+            borderRadius: 20,
             padding: "10px 16px",
             fontSize: 14,
             fontWeight: 600,
@@ -2411,7 +2420,7 @@ function ImportModal({ C, onClose, onApply }) {
           </div>
         )}
         {feedback === "ok" && (
-          <div style={{ fontSize: 12.5, color: "#3FA66B", marginTop: 8 }}>Importado correctamente.</div>
+          <div style={{ fontSize: 12.5, color: C.accent, marginTop: 8 }}>Importado correctamente.</div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
           <button onClick={onClose} style={ghostBtn(C)}>
@@ -2448,9 +2457,9 @@ function FilterChip({ C, active, label, onClick, dotColor }) {
         display: "flex",
         alignItems: "center",
         gap: 6,
-        background: active ? C.surfaceRaised : "transparent",
-        border: `1px solid ${active ? C.accent : C.border}`,
-        color: active ? C.text : C.textMuted,
+        background: active ? C.chipActiveBg : C.surfaceRaised,
+        border: `1px solid ${active ? C.chipActiveBg : C.borderSoft}`,
+        color: active ? C.chipActiveText : C.text,
         borderRadius: 20,
         padding: "6px 12px",
         fontSize: 13,
@@ -2487,8 +2496,8 @@ function InitiativeBoardCard({ C, initiative, taskCount, progress, dragging, onD
           style={{
             fontSize: 11,
             fontWeight: 700,
-            color: "#0B1A14",
-            background: color,
+            color: C.onAccent,
+            background: C.accent,
             borderRadius: 20,
             padding: "2px 8px",
             maxWidth: 170,
@@ -2536,7 +2545,6 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
   const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
   const today = new Date().toISOString().slice(0, 10);
   const isOverdue = task.dueDate && task.dueDate < today && task.status !== "done";
-  const iniColor = initiative ? initiativeColor(initiative) : C.accent;
   const shortIni = initiative ? initiative.title : null;
   return (
     <div
@@ -2564,10 +2572,13 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
           <span
             title={shortIni || typeMeta.label}
             style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
               fontSize: 11,
               fontWeight: 700,
-              color: "#0B1A14",
-              background: shortIni ? iniColor : typeMeta.color,
+              color: C.onAccent,
+              background: C.accent,
               borderRadius: 20,
               padding: "2px 8px",
               maxWidth: 148,
@@ -2577,6 +2588,7 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
               flexShrink: 1,
             }}
           >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.onAccent, opacity: 0.55, flexShrink: 0 }} />
             {shortIni || typeMeta.label}
           </span>
           <span style={{ fontSize: 12, color: C.textFaint, flexShrink: 0 }}>#{taskNumber(task)}</span>
@@ -2608,8 +2620,8 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
             fontSize: 10,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            color: "#7CFFB2",
-            background: "rgba(63,166,107,0.16)",
+            color: C.accent,
+            background: C.accentSoft,
             borderRadius: 6,
             padding: "2px 7px",
             marginBottom: 8,
@@ -3488,5 +3500,5 @@ function ghostBtn(C) {
 }
 
 function primaryBtn(C) {
-  return { background: C.accent, border: "none", color: "#FFFFFF", borderRadius: 8, padding: "8px 14px", fontSize: 13.5, fontWeight: 600, cursor: "pointer" };
+  return { background: C.accent, border: "none", color: C.onAccent, borderRadius: 20, padding: "8px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer" };
 }
