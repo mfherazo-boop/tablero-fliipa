@@ -451,6 +451,7 @@ export default function KanbanBoard() {
   const [importOpen, setImportOpen] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const [openTaskId, setOpenTaskId] = useState(null);
+  const [openInitId, setOpenInitId] = useState(null);
   const [planeOpen, setPlaneOpen] = useState(false);
   const [initiatives, setInitiatives] = useState([]);
   const [deletedTaskIds, setDeletedTaskIds] = useState({});
@@ -710,6 +711,8 @@ export default function KanbanBoard() {
         progress: Number(progress) || 0,
         color: AVATAR_COLORS[prev.length % AVATAR_COLORS.length],
         status: "backlog",
+        dueDate: null,
+        notes: "",
         createdAt: now,
         updatedAt: now,
       },
@@ -821,7 +824,14 @@ export default function KanbanBoard() {
 
   function updateInitiative(id, patch) {
     const now = Date.now();
-    setInitiatives((prev) => prev.map((i) => (idsMatch(i.id, id) ? { ...i, ...patch, updatedAt: now } : i)));
+    setInitiatives((prev) =>
+      prev.map((i) => {
+        if (!idsMatch(i.id, id)) return i;
+        const next = { ...i, ...patch, updatedAt: now };
+        if (patch.status && patch.status !== i.status) next.statusChangedAt = now;
+        return next;
+      })
+    );
   }
 
   function markPlaneItem({ kind, id, planeWorkItemId }) {
@@ -888,6 +898,20 @@ export default function KanbanBoard() {
     };
   }, [scopedTasks]);
 
+  const boardStats = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const sevenDays = 7 * 86400000;
+    return {
+      total: tasks.length,
+      vencidas: tasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== "done").length,
+      sinAsignar: tasks.filter((t) => !t.assignee).length,
+      bloqueadas: tasks.filter((t) => t.blocked).length,
+      cambioEstado: tasks.filter(
+        (t) => t.statusChangedAt && Date.now() - t.statusChangedAt <= sevenDays
+      ).length,
+    };
+  }, [tasks]);
+
   const lastUpdated = useMemo(() => {
     const latest = tasks.reduce(
       (max, t) => Math.max(max, t.statusChangedAt || 0, t.createdAt || 0),
@@ -946,6 +970,7 @@ export default function KanbanBoard() {
           <InitiativesView
             C={C}
             initiatives={initiativeStats}
+            stats={boardStats}
             saving={savingInit}
             error={initError}
             dark={dark}
@@ -957,6 +982,7 @@ export default function KanbanBoard() {
               setInitiativeFilter(id);
               setActiveTab("tablero");
             }}
+            onEdit={(id) => setOpenInitId(id)}
           />
         ) : (
           <>
@@ -1384,6 +1410,25 @@ export default function KanbanBoard() {
         />
       )}
 
+      {openInitId && initiatives.find((i) => idsMatch(i.id, openInitId)) && (
+        <InitiativeDetailDrawer
+          C={C}
+          initiative={initiatives.find((i) => idsMatch(i.id, openInitId))}
+          assignees={assignees.filter((a) => a !== "Todos")}
+          onClose={() => setOpenInitId(null)}
+          onSave={(patch) => updateInitiative(openInitId, patch)}
+          onDelete={() => {
+            deleteInitiative(openInitId);
+            setOpenInitId(null);
+          }}
+          onOpenBoard={() => {
+            setInitiativeFilter(openInitId);
+            setOpenInitId(null);
+            setActiveTab("tablero");
+          }}
+        />
+      )}
+
       {planeOpen && (
         <PlaneMigrateModal
           C={C}
@@ -1681,6 +1726,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
 function InitiativesView({
   C,
   initiatives,
+  stats,
   saving,
   error,
   dark,
@@ -1689,9 +1735,23 @@ function InitiativesView({
   onDelete,
   onAdjustProgress,
   onOpenBoard,
+  onEdit,
 }) {
   return (
     <div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 22 }}>
+        <StatCard C={C} label="Tareas" value={(stats && stats.total) || 0} caption="en total" />
+        <StatCard C={C} label="Vencidas" value={(stats && stats.vencidas) || 0} caption="en total" color={C.danger} />
+        <StatCard C={C} label="Sin asignar" value={(stats && stats.sinAsignar) || 0} caption="en total" />
+        <StatCard C={C} label="Bloqueadas" value={(stats && stats.bloqueadas) || 0} caption="en total" color={C.textFaint} />
+        <StatCard
+          C={C}
+          label="Cambio de estado · 7 días"
+          value={(stats && stats.cambioEstado) || 0}
+          caption="en total"
+          color={C.indigo}
+        />
+      </div>
       <div
         style={{
           display: "flex",
@@ -1821,6 +1881,7 @@ function InitiativesView({
               onDelete={() => onDelete(ini.id)}
               onAdjustProgress={(delta) => onAdjustProgress(ini.id, delta)}
               onOpen={() => onOpenBoard && onOpenBoard(ini.id)}
+              onEdit={() => onEdit && onEdit(ini.id)}
             />
           ))}
         </div>
@@ -1829,9 +1890,10 @@ function InitiativesView({
   );
 }
 
-function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen }) {
+function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen, onEdit }) {
   const [hover, setHover] = useState(false);
   const color = initiativeColor(initiative);
+  const statusLabel = (COLUMNS.find((c) => c.id === initiativeColumn(initiative)) || {}).label || "Nuevo";
   return (
     <div
       onClick={onOpen}
@@ -1854,7 +1916,7 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen }) {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{initiative.title}</div>
           <div style={{ fontSize: 12, color: C.textFaint, marginTop: 2 }}>
-            {initiative.taskCount || 0} tarea{(initiative.taskCount || 0) !== 1 ? "s" : ""}
+            #{taskNumber(initiative)} · {statusLabel}
           </div>
         </div>
       </div>
@@ -1870,7 +1932,27 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen }) {
           <div style={{ width: `${initiative.progress || 0}%`, height: "100%", background: color }} />
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit && onEdit();
+          }}
+          aria-label="Editar iniciativa"
+          title="Editar iniciativa"
+          style={{
+            background: hover ? C.surfaceRaised : "none",
+            border: "none",
+            color: C.textMuted,
+            cursor: "pointer",
+            fontSize: 15,
+            lineHeight: 1,
+            padding: "4px 6px",
+            borderRadius: 6,
+          }}
+        >
+          ✎
+        </button>
         {hover && (
           <button
             onClick={(e) => {
@@ -1883,6 +1965,267 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen }) {
             ✕
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onDelete, onOpenBoard }) {
+  const [title, setTitle] = useState(initiative.title || "");
+  const [owner, setOwner] = useState(initiative.owner || "__none__");
+  const [customOwner, setCustomOwner] = useState("");
+  const [status, setStatus] = useState(initiativeColumn(initiative));
+  const [dueDate, setDueDate] = useState(initiative.dueDate || "");
+  const [notes, setNotes] = useState(initiative.notes || "");
+  const [saving, setSaving] = useState(false);
+  const useCustom = owner === "__custom__";
+  const ownerOptions = Array.from(new Set([...(assignees || []), initiative.owner].filter(Boolean)));
+
+  useEffect(() => {
+    setTitle(initiative.title || "");
+    setOwner(initiative.owner || "__none__");
+    setCustomOwner("");
+    setStatus(initiativeColumn(initiative));
+    setDueDate(initiative.dueDate || "");
+    setNotes(initiative.notes || "");
+  }, [initiative.id]);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function patchField(partial) {
+    onSave(partial);
+  }
+
+  function handleSaveNotes() {
+    if (saving) return;
+    const finalOwner = useCustom ? customOwner.trim() : owner === "__none__" ? "" : owner;
+    setSaving(true);
+    onSave({
+      title: title.trim() || initiative.title,
+      owner: finalOwner,
+      status,
+      dueDate: dueDate || null,
+      notes: notes.trim(),
+    });
+    setSaving(false);
+  }
+
+  const history = [];
+  if (initiative.createdAt) history.push({ t: initiative.createdAt, text: "Iniciativa creada" });
+  if (initiative.statusChangedAt && initiative.statusChangedAt !== initiative.createdAt) {
+    const col = (COLUMNS.find((c) => c.id === initiative.status) || {}).label || initiative.status;
+    history.push({ t: initiative.statusChangedAt, text: `Estado actualizado a ${col}` });
+  }
+  if (initiative.planeMigratedAt) history.push({ t: initiative.planeMigratedAt, text: "Migrada a Plane" });
+  history.sort((a, b) => b.t - a.t);
+
+  const label = labelStyle(C);
+  const input = inputStyle(C);
+  const ghost = ghostBtn(C);
+  const primary = primaryBtn(C);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(8,10,14,0.28)",
+        display: "flex",
+        justifyContent: "flex-end",
+        zIndex: 50,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label={initiative.title || "Detalle de la iniciativa"}
+        style={{
+          width: "min(420px, 100%)",
+          height: "100%",
+          background: C.surface,
+          borderLeft: `1px solid ${C.border}`,
+          boxShadow: "-12px 0 40px rgba(0,0,0,0.28)",
+          overflowY: "auto",
+          padding: "18px 20px 28px",
+          animation: "fliipaDrawerIn 180ms ease-out",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+          <textarea
+            value={title}
+            rows={2}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => {
+              if (title.trim() && title.trim() !== initiative.title) patchField({ title: title.trim() });
+            }}
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              color: C.text,
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: 18,
+              fontWeight: 600,
+              lineHeight: 1.3,
+              padding: 0,
+              outline: "none",
+              resize: "none",
+              overflow: "hidden",
+            }}
+          />
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textFaint,
+              cursor: "pointer",
+              fontSize: 18,
+              lineHeight: 1,
+              padding: 4,
+              flexShrink: 0,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <button
+          onClick={onOpenBoard}
+          style={{
+            background: "none",
+            border: "none",
+            color: C.accent,
+            fontSize: 12.5,
+            fontWeight: 700,
+            cursor: "pointer",
+            padding: 0,
+            marginBottom: 14,
+            letterSpacing: "0.02em",
+          }}
+        >
+          INICIATIVA #{taskNumber(initiative)} · abrir tablero
+        </button>
+
+        <label style={label}>Estado</label>
+        <select
+          value={status}
+          onChange={(e) => {
+            const next = e.target.value;
+            setStatus(next);
+            patchField({ status: next });
+          }}
+          style={input}
+        >
+          {COLUMNS.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+
+        <label style={label}>Responsable</label>
+        <select
+          value={owner}
+          onChange={(e) => {
+            const next = e.target.value;
+            setOwner(next);
+            if (next !== "__custom__") patchField({ owner: next === "__none__" ? "" : next });
+          }}
+          style={input}
+        >
+          <option value="__none__">Sin asignar</option>
+          {ownerOptions.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+          <option value="__custom__">Otro…</option>
+        </select>
+        {useCustom && (
+          <input
+            value={customOwner}
+            onChange={(e) => setCustomOwner(e.target.value)}
+            onBlur={() => {
+              if (customOwner.trim()) patchField({ owner: customOwner.trim() });
+            }}
+            placeholder="Nombre del responsable"
+            style={{ ...input, marginTop: 8 }}
+          />
+        )}
+
+        <label style={label}>Fecha de vencimiento</label>
+        <input
+          type="date"
+          value={dueDate || ""}
+          onChange={(e) => {
+            const next = e.target.value;
+            setDueDate(next);
+            patchField({ dueDate: next || null });
+          }}
+          style={input}
+        />
+
+        <label style={label}>Notas</label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={7}
+          placeholder="Notas de la iniciativa"
+          style={{ ...input, resize: "vertical", minHeight: 140 }}
+        />
+
+        <button
+          onClick={handleSaveNotes}
+          style={{ ...primary, width: "100%", marginTop: 16, padding: "10px 14px", opacity: saving ? 0.7 : 1 }}
+          disabled={saving}
+        >
+          {saving ? "Guardando…" : "Guardar notas"}
+        </button>
+
+        <div style={{ fontSize: 12, color: C.textFaint, marginTop: 14 }}>
+          Actualizada {formatUpdated(initiative.updatedAt || initiative.createdAt || Date.now())}
+        </div>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1px solid ${C.borderSoft}` }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: C.textFaint,
+              marginBottom: 10,
+            }}
+          >
+            Historial
+          </div>
+          {history.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: C.textFaint }}>Sin cambios registrados en el tablero</div>
+          ) : (
+            history.map((item, idx) => (
+              <div key={idx} style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 8, lineHeight: 1.4 }}>
+                {item.text}
+                <div style={{ fontSize: 11.5, color: C.textFaint }}>{formatUpdated(item.t)}</div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <button
+          onClick={onDelete}
+          style={{ ...ghost, color: C.danger, borderColor: C.danger, marginTop: 18, width: "100%" }}
+        >
+          Eliminar iniciativa
+        </button>
       </div>
     </div>
   );
