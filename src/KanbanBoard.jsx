@@ -963,7 +963,7 @@ export default function KanbanBoard() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
-        html, body, #root { height: 100%; background: ${C.bg}; max-width: 100%; overflow-x: hidden; }
+        html, body, #root { height: 100%; width: 100%; background: ${C.bg}; overflow-x: hidden; }
         ::-webkit-scrollbar { height: 8px; width: 8px; }
         ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -978,24 +978,34 @@ export default function KanbanBoard() {
         @media (prefers-reduced-motion: reduce) {
           * { transition: none !important; animation: none !important; }
         }
-        .fliipa-page { padding: 22px 20px 40px; }
+        .fliipa-page { padding: 22px 24px 40px; min-width: 0; }
         .fliipa-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
         .fliipa-pills { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; }
         .fliipa-board {
           display: flex;
-          gap: 14px;
+          gap: 12px;
+          width: 100%;
+          min-width: 0;
           overflow-x: auto;
-          padding-bottom: 8px;
+          padding-bottom: 10px;
           -webkit-overflow-scrolling: touch;
+        }
+        .fliipa-col {
+          flex: 1 1 0 !important;
+          min-width: 210px !important;
         }
         .fliipa-init-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .fliipa-modal-pad { padding: 20px; }
+        @media (max-width: 1100px) {
+          .fliipa-page { padding: 16px 16px 32px; }
+          .fliipa-updated, .fliipa-subtitle { display: none !important; }
+        }
         @media (max-width: 900px) {
           .fliipa-page { padding: 14px 12px 28px; }
           .fliipa-top-row { padding: 8px 12px !important; }
           .fliipa-title-row { padding: 10px 12px !important; }
           .fliipa-title { font-size: 18px !important; }
-          .fliipa-subtitle, .fliipa-updated, .fliipa-share-btn { display: none !important; }
+          .fliipa-share-btn { display: none !important; }
           .fliipa-stat {
             flex: 1 1 calc(50% - 8px) !important;
             min-width: calc(50% - 8px) !important;
@@ -1016,9 +1026,7 @@ export default function KanbanBoard() {
             -webkit-overflow-scrolling: touch;
           }
           .fliipa-pills button { flex-shrink: 0; }
-          .fliipa-filter-controls {
-            width: 100%;
-          }
+          .fliipa-filter-controls { width: 100%; }
           .fliipa-filter-controls select {
             min-width: 0 !important;
             flex: 1 1 calc(50% - 8px);
@@ -1029,13 +1037,13 @@ export default function KanbanBoard() {
           }
           .fliipa-board {
             gap: 10px;
-            margin: 0 -12px;
-            padding: 4px 12px 16px;
             scroll-snap-type: x mandatory;
-            scroll-padding-left: 12px;
+            scroll-padding-inline: 12px;
           }
           .fliipa-col {
-            flex: 0 0 min(280px, calc(100vw - 56px)) !important;
+            flex: 0 0 78% !important;
+            min-width: 240px !important;
+            max-width: 340px !important;
             min-height: 340px !important;
             scroll-snap-align: start;
           }
@@ -1057,6 +1065,10 @@ export default function KanbanBoard() {
         @media (max-width: 560px) {
           .fliipa-avatars, .fliipa-plane-btn { display: none !important; }
           .fliipa-stat { padding: 12px 12px !important; }
+          .fliipa-col {
+            flex: 0 0 86% !important;
+            min-width: 260px !important;
+          }
         }
       `}</style>
 
@@ -1339,7 +1351,8 @@ export default function KanbanBoard() {
                     dropOnColumn(col.id);
                   }}
                   style={{
-                    flex: "0 0 286px",
+                    flex: "1 1 0",
+                    minWidth: 210,
                     background: C.surface,
                     border: `1px solid ${dragOverCol === col.id ? C.accent : C.borderSoft}`,
                     borderRadius: 14,
