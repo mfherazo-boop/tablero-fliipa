@@ -50,7 +50,7 @@ function isBrowserBlocked(error) {
   );
 }
 
-export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onItemMigrated }) {
+export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onItemMigrated, onBackup }) {
   const saved = useMemo(loadSettings, []);
   const [baseUrl, setBaseUrl] = useState(saved.baseUrl || DEFAULT_PLANE_BASE);
   const [apiKey, setApiKey] = useState("");
@@ -156,6 +156,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
     setSummary(null);
     setCorsBlocked(false);
     persistConnection(projectId);
+    if (onBackup) onBackup();
     try {
       const result = await migrateToPlane({
         baseUrl,
@@ -257,7 +258,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
             </li>
           </ol>
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, fontSize: 12.5 }}>
-            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> arriba a la derecha cambia de Lista al icono de <strong style={{ color: C.text }}>tablero</strong> (columnas). Al migrar, las columnas se llaman como aquí: Backlog, Por hacer, En progreso, En revisión, Hecho. Las tareas de una iniciativa quedan como subtareas. Este Kanban no se borra.
+            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> arriba a la derecha cambia de Lista al icono de <strong style={{ color: C.text }}>tablero</strong> (columnas). Al migrar, las columnas quedan en español: Pendiente, Por hacer, En progreso, En revisión, Hecho. Los menús de Plane (Work items, Add work item) se cambian en tu cuenta: avatar → Settings → Preferences → Language → Español. Este Kanban no se borra; lo eliminado se guarda en Papelera.
           </div>
         </div>
 

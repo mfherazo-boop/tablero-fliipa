@@ -43,14 +43,14 @@ function getColors(dark) {
 }
 
 const TASK_TYPES = {
-  Bug: { color: "#E2574C", label: "Bug" },
-  Feature: { color: "#3EE0B4", label: "Feature" },
+  Bug: { color: "#E2574C", label: "Incidencia" },
+  Feature: { color: "#3EE0B4", label: "Funcionalidad" },
   Task: { color: "#4C7EF3", label: "Tarea" },
   Mejora: { color: "#B48EDE", label: "Mejora" },
 };
 
 const COLUMNS = [
-  { id: "backlog", label: "Backlog", dot: "#C5CAD8" },
+  { id: "backlog", label: "Pendiente", dot: "#C5CAD8" },
   { id: "todo", label: "Por hacer", dot: "#8B8CFF" },
   { id: "in_progress", label: "En progreso", dot: "#5B8CFF" },
   { id: "review", label: "En revisión", dot: "#3EE0B4" },
@@ -167,6 +167,21 @@ function parseDeleted(result) {
   } catch (e) {
     return {};
   }
+}
+
+function trashEntry(item) {
+  return { deletedAt: Date.now(), item: item || null };
+}
+
+function trashItem(entry) {
+  if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.item) return entry.item;
+  return null;
+}
+
+function trashList(map) {
+  return Object.entries(map || {})
+    .map(([id, entry]) => ({ id, deletedAt: typeof entry === "number" ? entry : entry?.deletedAt || 0, item: trashItem(entry) }))
+    .sort((a, b) => b.deletedAt - a.deletedAt);
 }
 
 async function copyPlainText(text) {
@@ -459,6 +474,7 @@ export default function KanbanBoard() {
   const [modalOpen, setModalOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const [openTaskId, setOpenTaskId] = useState(null);
   const [openInitId, setOpenInitId] = useState(null);
@@ -732,8 +748,19 @@ export default function KanbanBoard() {
   }
 
   function deleteInitiative(id) {
-    setDeletedInitIds((prev) => ({ ...prev, [id]: Date.now() }));
+    const current = initiatives.find((i) => idsMatch(i.id, id));
+    setDeletedInitIds((prev) => ({ ...prev, [id]: trashEntry(current || trashItem(prev[id])) }));
     setInitiatives((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  function restoreInitiative(id) {
+    const item = trashItem(deletedInitIds[id]);
+    if (item) setInitiatives((prev) => mergeById(prev, [{ ...item, id }]));
+    setDeletedInitIds((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }
 
   function adjustInitiativeProgress(id, delta) {
@@ -753,6 +780,12 @@ export default function KanbanBoard() {
     if (!parsed || typeof parsed !== "object") throw new Error("Formato inválido");
     if (Array.isArray(parsed.tasks)) setTasks((prev) => mergeById(prev, parsed.tasks));
     if (Array.isArray(parsed.initiatives)) setInitiatives((prev) => mergeById(prev, parsed.initiatives));
+    if (parsed.deletedTaskIds && typeof parsed.deletedTaskIds === "object") {
+      setDeletedTaskIds((prev) => ({ ...parsed.deletedTaskIds, ...prev }));
+    }
+    if (parsed.deletedInitIds && typeof parsed.deletedInitIds === "object") {
+      setDeletedInitIds((prev) => ({ ...parsed.deletedInitIds, ...prev }));
+    }
     if (parsed.theme === "dark" || parsed.theme === "light") setDark(parsed.theme === "dark");
   }
 
@@ -881,9 +914,20 @@ export default function KanbanBoard() {
   }
 
   function deleteTask(id) {
-    setDeletedTaskIds((prev) => ({ ...prev, [id]: Date.now() }));
+    const current = tasks.find((t) => t.id === id);
+    setDeletedTaskIds((prev) => ({ ...prev, [id]: trashEntry(current || trashItem(prev[id])) }));
     setTasks((prev) => prev.filter((t) => t.id !== id));
     if (openTaskId === id) setOpenTaskId(null);
+  }
+
+  function restoreTask(id) {
+    const item = trashItem(deletedTaskIds[id]);
+    if (item) setTasks((prev) => mergeById(prev, [{ ...item, id }]));
+    setDeletedTaskIds((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }
 
   function toggleBlocked(id) {
@@ -1083,6 +1127,8 @@ export default function KanbanBoard() {
         onOpenExport={() => setExportOpen(true)}
         onOpenImport={() => setImportOpen(true)}
         onOpenPlane={() => setPlaneOpen(true)}
+        onOpenTrash={() => setTrashOpen(true)}
+        trashCount={Object.keys(deletedTaskIds).length + Object.keys(deletedInitIds).length}
       />
 
       <div className="fliipa-page">
@@ -1264,7 +1310,7 @@ export default function KanbanBoard() {
                   lineHeight: 1.45,
                 }}
               >
-                Esta iniciativa ya está en el tablero (columna Backlog). Aún no tiene tareas: pulsa{" "}
+                Esta iniciativa ya está en el tablero (columna Pendiente). Aún no tiene tareas: pulsa{" "}
                 <strong style={{ color: C.text }}>Nueva tarea</strong> y se asignará aquí.
               </div>
             )}
@@ -1463,13 +1509,31 @@ export default function KanbanBoard() {
       {exportOpen && (
         <ExportModal
           C={C}
-          data={{ tasks, initiatives, theme: dark ? "dark" : "light", exportedAt: Date.now() }}
+          data={{
+            tasks,
+            initiatives,
+            deletedTaskIds,
+            deletedInitIds,
+            theme: dark ? "dark" : "light",
+            exportedAt: Date.now(),
+          }}
           onClose={() => setExportOpen(false)}
         />
       )}
 
       {importOpen && (
         <ImportModal C={C} onClose={() => setImportOpen(false)} onApply={applyImportedSnapshot} />
+      )}
+
+      {trashOpen && (
+        <TrashModal
+          C={C}
+          tasks={trashList(deletedTaskIds)}
+          initiatives={trashList(deletedInitIds)}
+          onRestoreTask={restoreTask}
+          onRestoreInitiative={restoreInitiative}
+          onClose={() => setTrashOpen(false)}
+        />
       )}
 
       {previewAttachment && (
@@ -1515,6 +1579,16 @@ export default function KanbanBoard() {
           initiatives={initiatives}
           onClose={() => setPlaneOpen(false)}
           onItemMigrated={markPlaneItem}
+          onBackup={() => {
+            const payload = {
+              savedAt: Date.now(),
+              tasks,
+              initiatives,
+              deletedTaskIds,
+              deletedInitIds,
+            };
+            setWithRetry("fliipa-kanban:respaldo", JSON.stringify(payload), true);
+          }}
         />
       )}
     </div>
@@ -1560,7 +1634,7 @@ async function copyShareLink(title) {
   }
 }
 
-function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenPlane }) {
+function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenPlane, onOpenTrash, trashCount }) {
   const [shareStatus, setShareStatus] = useState(null);
   const shareTimerRef = useRef(null);
 
@@ -1640,6 +1714,24 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             title="Enviar iniciativas y tareas a Plane cuando quieran dejar de usar este Kanban"
           >
             Migrar a Plane
+          </button>
+          <button
+            onClick={onOpenTrash}
+            style={{
+              background: "none",
+              border: `1px solid ${C.border}`,
+              color: C.textMuted,
+              borderRadius: 8,
+              padding: "5px 10px",
+              cursor: "pointer",
+              fontSize: 12.5,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+            }}
+            aria-label="Papelera"
+            title="Tareas e iniciativas eliminadas. Se guardan aquí, no se pierden."
+          >
+            Papelera{trashCount ? ` (${trashCount})` : ""}
           </button>
           <button
             onClick={onOpenExport}
@@ -1849,7 +1941,7 @@ function InitiativesView({
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Iniciativas estratégicas de Fliipa</div>
           <div style={{ fontSize: 13, color: C.textMuted }}>
-            % de avance sube al mover las tareas de columna (Backlog 0% → Por hacer 25% → En progreso 50% → En revisión 75% → Hecho 100%). Clic en una fila abre su tablero.
+            % de avance sube al mover las tareas de columna (Pendiente 0% → Por hacer 25% → En progreso 50% → En revisión 75% → Hecho 100%). Clic en una fila abre su tablero.
           </div>
         </div>
         <button
@@ -2473,6 +2565,103 @@ function ExportModal({ C, data, onClose }) {
           </button>
           <button onClick={handleCopy} style={primaryBtn(C)}>
             {copied === "ok" ? "¡Copiado!" : copied === "failed" ? "No se pudo copiar" : "Copiar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative, onClose }) {
+  const empty = (!tasks || tasks.length === 0) && (!initiatives || initiatives.length === 0);
+  const row = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+    padding: "8px 0",
+    borderBottom: `1px solid ${C.borderSoft}`,
+  };
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(8,10,14,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 480, padding: 20, maxHeight: "80vh", overflowY: "auto" }}
+      >
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 8 }}>Papelera</div>
+        <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
+          Lo que se elimina del tablero se guarda aquí. Puedes restaurarlo cuando quieras.
+        </div>
+        {empty ? (
+          <div style={{ fontSize: 13, color: C.textFaint }}>No hay nada eliminado.</div>
+        ) : (
+          <>
+            {initiatives.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textFaint, marginBottom: 4 }}>
+                  Iniciativas
+                </div>
+                {initiatives.map((entry) => (
+                  <div key={entry.id} style={row}>
+                    <div style={{ fontSize: 13, color: C.text }}>
+                      {entry.item?.title || "Iniciativa eliminada (sin copia)"}
+                    </div>
+                    <button
+                      onClick={() => onRestoreInitiative(entry.id)}
+                      disabled={!entry.item}
+                      style={{
+                        background: "none",
+                        border: `1px solid ${C.border}`,
+                        color: C.textMuted,
+                        borderRadius: 8,
+                        padding: "5px 10px",
+                        cursor: entry.item ? "pointer" : "not-allowed",
+                        fontSize: 12,
+                      }}
+                    >
+                      Restaurar
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {tasks.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textFaint, marginBottom: 4 }}>
+                  Tareas
+                </div>
+                {tasks.map((entry) => (
+                  <div key={entry.id} style={row}>
+                    <div style={{ fontSize: 13, color: C.text }}>
+                      {entry.item?.title || "Tarea eliminada (sin copia)"}
+                    </div>
+                    <button
+                      onClick={() => onRestoreTask(entry.id)}
+                      disabled={!entry.item}
+                      style={{
+                        background: "none",
+                        border: `1px solid ${C.border}`,
+                        color: C.textMuted,
+                        borderRadius: 8,
+                        padding: "5px 10px",
+                        cursor: entry.item ? "pointer" : "not-allowed",
+                        fontSize: 12,
+                      }}
+                    >
+                      Restaurar
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+          <button onClick={onClose} style={ghostBtn(C)}>
+            Cerrar
           </button>
         </div>
       </div>

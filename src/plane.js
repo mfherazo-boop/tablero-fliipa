@@ -18,7 +18,7 @@ const COLUMN_HINTS = {
 };
 
 const FLIIPA_STATE_STYLE = {
-  backlog: { name: "Backlog", color: "#C5CAD8" },
+  backlog: { name: "Pendiente", color: "#C5CAD8" },
   todo: { name: "Por hacer", color: "#8B8CFF" },
   in_progress: { name: "En progreso", color: "#5B8CFF" },
   review: { name: "En revisión", color: "#B48EDE" },
@@ -229,6 +229,26 @@ export function matchMember(members, name) {
     const email = String(m?.email || m?.member?.email || "").toLowerCase();
     return hay === needle || hay.includes(needle) || email.split("@")[0] === needle;
   });
+}
+
+async function alignPlaneLabels(cfg, labels) {
+  const renames = { bug: "Incidencia", feature: "Funcionalidad", task: "Tarea" };
+  for (const label of labels || []) {
+    const next = renames[String(label.name || "").toLowerCase()];
+    if (!next || String(label.name) === next) continue;
+    try {
+      const updated = await planeRequest({
+        ...cfg,
+        method: "PATCH",
+        path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/labels/${label.id}/`,
+        body: { name: next },
+      });
+      Object.assign(label, updated || { name: next });
+    } catch (e) {
+      /* ignore */
+    }
+    await sleep(120);
+  }
 }
 
 async function ensureLabel(cfg, labels, name, color) {
@@ -517,6 +537,11 @@ export async function migrateToPlane({
   } catch (e) {
     /* ignore */
   }
+  try {
+    await alignPlaneLabels(cfg, labels);
+  } catch (e) {
+    /* ignore */
+  }
   const stateMap = {
     backlog: matchState(states, "backlog"),
     todo: matchState(states, "todo"),
@@ -526,8 +551,14 @@ export async function migrateToPlane({
   };
 
   const typeLabels = {};
-  for (const name of ["Bug", "Feature", "Tarea", "Mejora", "Iniciativa"]) {
-    const key = name === "Tarea" ? "Task" : name;
+  const planeTypeNames = [
+    { key: "Bug", name: "Incidencia" },
+    { key: "Feature", name: "Funcionalidad" },
+    { key: "Task", name: "Tarea" },
+    { key: "Mejora", name: "Mejora" },
+    { key: "Iniciativa", name: "Iniciativa" },
+  ];
+  for (const { key, name } of planeTypeNames) {
     typeLabels[key] = await ensureLabel(cfg, labels, name, TYPE_COLORS[key] || TYPE_COLORS.Iniciativa);
     await sleep(150);
   }
