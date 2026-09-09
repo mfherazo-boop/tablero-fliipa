@@ -173,15 +173,38 @@ function trashEntry(item) {
   return { deletedAt: Date.now(), item: item || null };
 }
 
+function isPurged(entry) {
+  return !!(entry && typeof entry === "object" && !Array.isArray(entry) && entry.purged);
+}
+
 function trashItem(entry) {
   if (entry && typeof entry === "object" && !Array.isArray(entry) && entry.item) return entry.item;
   return null;
 }
 
-function trashList(map) {
+function trashStamp(entry) {
+  if (typeof entry === "number") return entry;
+  return (entry && entry.deletedAt) || 0;
+}
+
+function trashList(map, { includePurged = false } = {}) {
   return Object.entries(map || {})
-    .map(([id, entry]) => ({ id, deletedAt: typeof entry === "number" ? entry : entry?.deletedAt || 0, item: trashItem(entry) }))
+    .filter(([, entry]) => includePurged || !isPurged(entry))
+    .map(([id, entry]) => ({ id, deletedAt: trashStamp(entry), item: trashItem(entry), purged: isPurged(entry) }))
     .sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+function purgeEntry(entry, id) {
+  const item = trashItem(entry);
+  return {
+    deletedAt: trashStamp(entry) || Date.now(),
+    purged: true,
+    item: {
+      id: (item && item.id) || id,
+      title: (item && item.title) || "",
+      planeWorkItemId: (item && item.planeWorkItemId) || null,
+    },
+  };
 }
 
 async function copyPlainText(text) {
@@ -755,11 +778,18 @@ export default function KanbanBoard() {
 
   function restoreInitiative(id) {
     const item = trashItem(deletedInitIds[id]);
-    if (item) setInitiatives((prev) => mergeById(prev, [{ ...item, id }]));
+    if (item) setInitiatives((prev) => mergeById(prev, [{ ...item, id, updatedAt: Date.now() }]));
     setDeletedInitIds((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
+    });
+  }
+
+  function purgeInitiative(id) {
+    setDeletedInitIds((prev) => {
+      if (!prev[id]) return prev;
+      return { ...prev, [id]: purgeEntry(prev[id], id) };
     });
   }
 
@@ -922,10 +952,34 @@ export default function KanbanBoard() {
 
   function restoreTask(id) {
     const item = trashItem(deletedTaskIds[id]);
-    if (item) setTasks((prev) => mergeById(prev, [{ ...item, id }]));
+    if (item) setTasks((prev) => mergeById(prev, [{ ...item, id, updatedAt: Date.now() }]));
     setDeletedTaskIds((prev) => {
       const next = { ...prev };
       delete next[id];
+      return next;
+    });
+  }
+
+  function purgeTask(id) {
+    setDeletedTaskIds((prev) => {
+      if (!prev[id]) return prev;
+      return { ...prev, [id]: purgeEntry(prev[id], id) };
+    });
+  }
+
+  function emptyTrash() {
+    setDeletedTaskIds((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((id) => {
+        if (!isPurged(next[id])) next[id] = purgeEntry(next[id], id);
+      });
+      return next;
+    });
+    setDeletedInitIds((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((id) => {
+        if (!isPurged(next[id])) next[id] = purgeEntry(next[id], id);
+      });
       return next;
     });
   }
@@ -1169,7 +1223,7 @@ export default function KanbanBoard() {
         onOpenImport={() => setImportOpen(true)}
         onOpenPlane={() => setPlaneOpen(true)}
         onOpenTrash={() => setTrashOpen(true)}
-        trashCount={Object.keys(deletedTaskIds).length + Object.keys(deletedInitIds).length}
+        trashCount={trashList(deletedTaskIds).length + trashList(deletedInitIds).length}
       />
 
       <div className="fliipa-page">
@@ -1600,6 +1654,9 @@ export default function KanbanBoard() {
           initiatives={trashList(deletedInitIds)}
           onRestoreTask={restoreTask}
           onRestoreInitiative={restoreInitiative}
+          onPurgeTask={purgeTask}
+          onPurgeInitiative={purgeInitiative}
+          onEmpty={emptyTrash}
           onClose={() => setTrashOpen(false)}
         />
       )}
@@ -1646,12 +1703,12 @@ export default function KanbanBoard() {
           tasks={tasks}
           initiatives={initiatives}
           deletedItems={[
-            ...trashList(deletedTaskIds).map((entry) => ({
+            ...trashList(deletedTaskIds, { includePurged: true }).map((entry) => ({
               id: entry.id,
               title: entry.item?.title || "",
               planeWorkItemId: entry.item?.planeWorkItemId || null,
             })),
-            ...trashList(deletedInitIds).map((entry) => ({
+            ...trashList(deletedInitIds, { includePurged: true }).map((entry) => ({
               id: entry.id,
               title: entry.item?.title || "",
               planeWorkItemId: entry.item?.planeWorkItemId || null,
@@ -1809,7 +1866,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
               whiteSpace: "nowrap",
             }}
             aria-label="Papelera"
-            title="Tareas e iniciativas eliminadas. Se guardan aquí, no se pierden."
+            title="Tareas e iniciativas eliminadas. Puedes restaurarlas o borrarlas para siempre."
           >
             Papelera{trashCount ? ` (${trashCount})` : ""}
           </button>
@@ -2068,11 +2125,11 @@ const INFO_TOPICS = [
     id: "papelera",
     title: "Papelera",
     kicker: "Nada se pierde",
-    body: "Al eliminar una tarea o una iniciativa no desaparece: pasa a Papelera. Desde ahí se restaura. Lo que está en papelera no vuelve a Plane al migrar.",
+    body: "Al eliminar una tarea o una iniciativa no desaparece: pasa a Papelera. Desde ahí puedes restaurarla o borrarla para siempre. Lo que está o estuvo en papelera no vuelve a Plane al migrar.",
     steps: [
       "Abre Papelera en la barra de arriba.",
       "Restaurar la devuelve al tablero con sus datos.",
-      "Si borras por error, no hace falta recrearla desde cero.",
+      "Eliminar definitivamente la saca de la papelera. No se puede deshacer.",
     ],
   },
   {
@@ -2935,7 +2992,8 @@ function ExportModal({ C, data, onClose }) {
   );
 }
 
-function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative, onClose }) {
+function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative, onPurgeTask, onPurgeInitiative, onEmpty, onClose }) {
+  const [confirm, setConfirm] = useState(null);
   const empty = (!tasks || tasks.length === 0) && (!initiatives || initiatives.length === 0);
   const row = {
     display: "flex",
@@ -2945,6 +3003,63 @@ function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative,
     padding: "8px 0",
     borderBottom: `1px solid ${C.borderSoft}`,
   };
+  const restoreBtn = {
+    background: C.accentSoft,
+    border: `1px solid ${C.accent}`,
+    color: C.accent,
+    borderRadius: 8,
+    padding: "5px 10px",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 700,
+  };
+  const purgeBtn = {
+    background: "none",
+    border: `1px solid ${C.danger}`,
+    color: C.danger,
+    borderRadius: 8,
+    padding: "5px 10px",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 600,
+  };
+
+  function confirmLabel() {
+    if (!confirm) return "";
+    if (confirm.type === "all") return "Se vacía la papelera. Lo que hay aquí se elimina para siempre.";
+    return `«${confirm.title}» se elimina para siempre. No se puede deshacer.`;
+  }
+
+  function runConfirm() {
+    if (!confirm) return;
+    if (confirm.type === "task") onPurgeTask(confirm.id);
+    else if (confirm.type === "init") onPurgeInitiative(confirm.id);
+    else if (confirm.type === "all") onEmpty();
+    setConfirm(null);
+  }
+
+  function actionPair(entry, kind) {
+    const title = entry.item?.title || (kind === "init" ? "Iniciativa eliminada" : "Tarea eliminada");
+    const canRestore = !!entry.item && (entry.item.title || entry.item.id);
+    return (
+      <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <button
+          onClick={() => (kind === "init" ? onRestoreInitiative(entry.id) : onRestoreTask(entry.id))}
+          disabled={!canRestore}
+          style={{ ...restoreBtn, opacity: canRestore ? 1 : 0.45, cursor: canRestore ? "pointer" : "not-allowed" }}
+        >
+          Restaurar
+        </button>
+        <button
+          onClick={() => setConfirm({ type: kind, id: entry.id, title })}
+          style={purgeBtn}
+        >
+          Eliminar
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       onClick={onClose}
@@ -2952,14 +3067,47 @@ function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative,
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 480, padding: 20, maxHeight: "80vh", overflowY: "auto" }}
+        style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 520, padding: 20, maxHeight: "80vh", overflowY: "auto" }}
       >
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 8 }}>Papelera</div>
         <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
-          Lo que se elimina del tablero se guarda aquí. Puedes restaurarlo cuando quieras.
+          Restaurar la devuelve al tablero. Eliminar la borra para siempre.
         </div>
+        {confirm && (
+          <div
+            style={{
+              background: C.surfaceRaised,
+              border: `1px solid ${C.danger}`,
+              borderRadius: 10,
+              padding: "10px 12px",
+              marginBottom: 14,
+            }}
+          >
+            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.45, marginBottom: 10 }}>{confirmLabel()}</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={() => setConfirm(null)} style={ghostBtn(C)}>
+                Cancelar
+              </button>
+              <button
+                onClick={runConfirm}
+                style={{
+                  background: C.danger,
+                  border: "none",
+                  color: "#fff",
+                  borderRadius: 8,
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                }}
+              >
+                Eliminar definitivamente
+              </button>
+            </div>
+          </div>
+        )}
         {empty ? (
-          <div style={{ fontSize: 13, color: C.textFaint }}>No hay nada eliminado.</div>
+          <div style={{ fontSize: 13, color: C.textFaint }}>No hay nada en la papelera.</div>
         ) : (
           <>
             {initiatives.length > 0 && (
@@ -2969,24 +3117,10 @@ function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative,
                 </div>
                 {initiatives.map((entry) => (
                   <div key={entry.id} style={row}>
-                    <div style={{ fontSize: 13, color: C.text }}>
+                    <div style={{ fontSize: 13, color: C.text, minWidth: 0 }}>
                       {entry.item?.title || "Iniciativa eliminada (sin copia)"}
                     </div>
-                    <button
-                      onClick={() => onRestoreInitiative(entry.id)}
-                      disabled={!entry.item}
-                      style={{
-                        background: "none",
-                        border: `1px solid ${C.border}`,
-                        color: C.textMuted,
-                        borderRadius: 8,
-                        padding: "5px 10px",
-                        cursor: entry.item ? "pointer" : "not-allowed",
-                        fontSize: 12,
-                      }}
-                    >
-                      Restaurar
-                    </button>
+                    {actionPair(entry, "init")}
                   </div>
                 ))}
               </div>
@@ -2998,31 +3132,28 @@ function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative,
                 </div>
                 {tasks.map((entry) => (
                   <div key={entry.id} style={row}>
-                    <div style={{ fontSize: 13, color: C.text }}>
+                    <div style={{ fontSize: 13, color: C.text, minWidth: 0 }}>
                       {entry.item?.title || "Tarea eliminada (sin copia)"}
                     </div>
-                    <button
-                      onClick={() => onRestoreTask(entry.id)}
-                      disabled={!entry.item}
-                      style={{
-                        background: "none",
-                        border: `1px solid ${C.border}`,
-                        color: C.textMuted,
-                        borderRadius: 8,
-                        padding: "5px 10px",
-                        cursor: entry.item ? "pointer" : "not-allowed",
-                        fontSize: 12,
-                      }}
-                    >
-                      Restaurar
-                    </button>
+                    {actionPair(entry, "task")}
                   </div>
                 ))}
               </div>
             )}
           </>
         )}
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+          <button
+            onClick={() => setConfirm({ type: "all" })}
+            disabled={empty}
+            style={{
+              ...purgeBtn,
+              opacity: empty ? 0.4 : 1,
+              cursor: empty ? "not-allowed" : "pointer",
+            }}
+          >
+            Vaciar papelera
+          </button>
           <button onClick={onClose} style={ghostBtn(C)}>
             Cerrar
           </button>
