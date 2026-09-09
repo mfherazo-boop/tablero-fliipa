@@ -509,26 +509,100 @@ async function removeWorkItem(cfg, item, cancelledStateId) {
   }
 }
 
-async function cleanupPlaneExtras(cfg, { keepIds, deletedIds, states }) {
-  const keep = new Set([...(keepIds || [])].map(String));
-  const deleted = new Set([...(deletedIds || [])].map(String));
-  const cancelled = (states || []).find((s) => s.group === "cancelled");
-  const remote = await listAllWorkItems(cfg);
-  const drop = [];
-  for (const item of remote) {
-    const ext = item.external_id == null || item.external_id === "" ? "" : String(item.external_id);
-    const onboarding = isPlaneOnboarding(item);
-    const goneFromFliipa = (ext && deleted.has(ext)) || (isFliipaItem(item) && ext && !keep.has(ext));
-    if (onboarding || goneFromFliipa) drop.push(item);
+function normTitle(value) {
+  return String(value || "")
+    .replace(/^\[iniciativa\]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function parentIdOf(item) {
+  if (!item || item.parent == null || item.parent === "") return "";
+  if (typeof item.parent === "string") return item.parent;
+  return item.parent.id || "";
+}
+
+async function hydrateWorkItem(cfg, item) {
+  if (!item?.id) return item;
+  if (item.external_id || item.external_source) return item;
+  const paths = [
+    `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/${item.id}/`,
+    `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/issues/${item.id}/`,
+  ];
+  for (const path of paths) {
+    try {
+      const detail = await planeRequest({ ...cfg, path });
+      if (detail && detail.id) return { ...item, ...detail };
+    } catch (e) {
+      /* try next */
+    }
   }
-  drop.sort((a, b) => {
-    const ap = a.parent ? 0 : 1;
-    const bp = b.parent ? 0 : 1;
-    return ap - bp;
+  return item;
+}
+
+async function cleanupPlaneExtras(cfg, { keepIds, keepPlaneIds, keepTitles, deletedItems, states }) {
+  const keepExt = new Set([...(keepIds || [])].map(String));
+  const keepPlane = new Set([...(keepPlaneIds || [])].filter(Boolean).map(String));
+  const records = (deletedItems || []).map((row) => (typeof row === "string" ? { id: row } : row || {}));
+  const delExt = new Set(records.map((row) => String(row.id || "")).filter(Boolean));
+  const delPlane = new Set(records.map((row) => String(row.planeWorkItemId || "")).filter(Boolean));
+  const liveTitles = new Set([...(keepTitles || [])].map(normTitle).filter(Boolean));
+  const delTitles = new Set();
+  records.forEach((row) => {
+    const title = normTitle(row.title);
+    if (title) delTitles.add(title);
   });
+  const cancelled = (states || []).find((s) => s.group === "cancelled");
   let removed = 0;
   const errors = [];
+  const alreadyRemoved = new Set();
+
+  for (const planeId of delPlane) {
+    if (keepPlane.has(planeId)) continue;
+    const ok = await removeWorkItem(cfg, { id: planeId }, cancelled?.id);
+    if (ok) {
+      removed += 1;
+      alreadyRemoved.add(planeId);
+    } else {
+      errors.push(`No se pudo quitar en Plane el ítem ya borrado (${planeId.slice(0, 8)}…)`);
+    }
+    await sleep(180);
+  }
+
+  const remote = [];
+  for (const item of await listAllWorkItems(cfg)) {
+    remote.push(await hydrateWorkItem(cfg, item));
+    await sleep(40);
+  }
+
+  const drop = [];
+  const dropIds = new Set();
+  function markDrop(item) {
+    if (!item?.id || keepPlane.has(item.id) || dropIds.has(item.id) || alreadyRemoved.has(item.id)) return;
+    dropIds.add(item.id);
+    drop.push(item);
+  }
+
+  for (const item of remote) {
+    const ext = item.external_id == null || item.external_id === "" ? "" : String(item.external_id);
+    const title = normTitle(item.name || item.title);
+    const gone =
+      delPlane.has(item.id) ||
+      (ext && delExt.has(ext)) ||
+      (isFliipaItem(item) && ext && !keepExt.has(ext)) ||
+      (title && delTitles.has(title) && !liveTitles.has(title)) ||
+      isPlaneOnboarding(item);
+    if (gone) markDrop(item);
+  }
+  for (const item of remote) {
+    const parent = parentIdOf(item);
+    if (parent && dropIds.has(parent)) markDrop(item);
+  }
+
+  drop.sort((a, b) => (parentIdOf(a) ? 0 : 1) - (parentIdOf(b) ? 0 : 1));
   for (const item of drop) {
+    if (alreadyRemoved.has(item.id)) continue;
     const ok = await removeWorkItem(cfg, item, cancelled?.id);
     if (ok) removed += 1;
     else errors.push(`No se pudo quitar: ${item.name || item.id}`);
@@ -658,11 +732,16 @@ export async function migrateToPlane({
   tasks,
   initiatives,
   deletedIds,
+  deletedItems,
   onProgress,
   onItemMigrated,
 }) {
   const cfg = { baseUrl, apiKey, workspace: parseWorkspaceInput(workspace), projectId };
-  const dropped = new Set([...(deletedIds || [])].map(String));
+  const deletedRecords =
+    deletedItems && deletedItems.length
+      ? deletedItems
+      : (deletedIds || []).map((id) => ({ id }));
+  const dropped = new Set(deletedRecords.map((row) => String(row.id || row)).filter(Boolean));
   const liveTasks = (tasks || []).filter((t) => t && !dropped.has(String(t.id)));
   const liveInits = (initiatives || []).filter((i) => i && !dropped.has(String(i.id)));
   const keepIds = [...liveTasks.map((t) => t.id), ...liveInits.map((i) => i.id)];
@@ -687,17 +766,6 @@ export async function migrateToPlane({
     /* ignore */
   }
   const summary = { created: 0, updated: 0, failed: 0, removed: 0, errors: [] };
-  try {
-    if (onProgress) onProgress({ current: 0, total: 1, label: "Quitando ejemplos y ítems borrados" });
-    const cleaned = await cleanupPlaneExtras(cfg, { keepIds, deletedIds: dropped, states });
-    summary.removed = cleaned.removed;
-    if (cleaned.errors?.length) summary.errors.push(...cleaned.errors.slice(0, 8));
-    if (cleaned.scanned === 0) {
-      summary.errors.push("No se pudieron listar los work items de Plane para limpiar ejemplos.");
-    }
-  } catch (e) {
-    summary.errors.push(`Limpieza: ${e.message}`);
-  }
   const stateMap = {
     backlog: matchState(states, "backlog"),
     todo: matchState(states, "todo"),
@@ -792,6 +860,21 @@ export async function migrateToPlane({
       summary.errors.push(`${item.title || item.id}: ${e.message}`);
     }
     await sleep(250);
+  }
+
+  try {
+    if (onProgress) onProgress({ current: items.length, total: items.length, label: "Quitando en Plane lo que ya no está en Fliipa" });
+    const cleaned = await cleanupPlaneExtras(cfg, {
+      keepIds,
+      keepPlaneIds: Object.values(planeIds),
+      keepTitles: [...liveTasks.map((t) => t.title), ...liveInits.map((i) => i.title)],
+      deletedItems: deletedRecords,
+      states,
+    });
+    summary.removed = cleaned.removed;
+    if (cleaned.errors?.length) summary.errors.push(...cleaned.errors.slice(0, 8));
+  } catch (e) {
+    summary.errors.push(`Limpieza: ${e.message}`);
   }
 
   return summary;

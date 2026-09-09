@@ -50,7 +50,7 @@ function isBrowserBlocked(error) {
   );
 }
 
-export default function PlaneMigrateModal({ C, tasks, initiatives, deletedIds, onClose, onItemMigrated, onBackup }) {
+export default function PlaneMigrateModal({ C, tasks, initiatives, deletedItems, onClose, onItemMigrated, onBackup }) {
   const saved = useMemo(loadSettings, []);
   const [baseUrl, setBaseUrl] = useState(saved.baseUrl || DEFAULT_PLANE_BASE);
   const [apiKey, setApiKey] = useState("");
@@ -165,7 +165,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, deletedIds, o
         projectId,
         tasks,
         initiatives,
-        deletedIds,
+        deletedItems,
         onProgress: setProgress,
         onItemMigrated,
       });
@@ -176,8 +176,8 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, deletedIds, o
         result.failed
           ? "La migración terminó con algunos errores. Puedes volver a intentarlo: lo ya enviado se actualiza, no se duplica."
           : result.removed
-            ? `Listo. Se quitaron ${result.removed} ítems de ejemplo o ya borrados. En Plane recarga la página.`
-            : "Listo. El tablero de Fliipa sigue igual; ahora también está en Plane. Recarga Plane si aún ves ejemplos viejos."
+            ? `Listo. Se quitaron ${result.removed} ítems en Plane (los que ya no están en Fliipa). Recarga Plane con F5.`
+            : "Listo. Lo de Fliipa quedó actualizado en Plane. Si borraste algo y aún lo ves, recarga Plane con F5."
       );
     } catch (e) {
       setStatus("error");

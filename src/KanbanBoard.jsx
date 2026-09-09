@@ -1577,7 +1577,18 @@ export default function KanbanBoard() {
           C={C}
           tasks={tasks}
           initiatives={initiatives}
-          deletedIds={[...Object.keys(deletedTaskIds), ...Object.keys(deletedInitIds)]}
+          deletedItems={[
+            ...trashList(deletedTaskIds).map((entry) => ({
+              id: entry.id,
+              title: entry.item?.title || "",
+              planeWorkItemId: entry.item?.planeWorkItemId || null,
+            })),
+            ...trashList(deletedInitIds).map((entry) => ({
+              id: entry.id,
+              title: entry.item?.title || "",
+              planeWorkItemId: entry.item?.planeWorkItemId || null,
+            })),
+          ]}
           onClose={() => setPlaneOpen(false)}
           onItemMigrated={markPlaneItem}
           onBackup={() => {
