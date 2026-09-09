@@ -1023,6 +1023,9 @@ export default function KanbanBoard() {
           * { transition: none !important; animation: none !important; }
         }
         .fliipa-page { padding: 22px 24px 40px; min-width: 0; }
+        .fliipa-info-grid { display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: start; }
+        .fliipa-info-nav { position: sticky; top: 12px; }
+        .fliipa-info-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .fliipa-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
         .fliipa-pills { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; min-width: 0; }
         .fliipa-board {
@@ -1043,6 +1046,11 @@ export default function KanbanBoard() {
         @media (max-width: 1100px) {
           .fliipa-page { padding: 16px 16px 32px; }
           .fliipa-updated, .fliipa-subtitle { display: none !important; }
+          .fliipa-info-grid { grid-template-columns: 1fr; }
+          .fliipa-info-nav { position: static; }
+        }
+        @media (max-width: 720px) {
+          .fliipa-info-cards { grid-template-columns: 1fr; }
         }
         @media (max-width: 900px) {
           .fliipa-page { padding: 14px 12px 28px; }
@@ -1132,7 +1140,13 @@ export default function KanbanBoard() {
       />
 
       <div className="fliipa-page">
-        {activeTab === "iniciativas" ? (
+        {activeTab === "info" ? (
+          <InfoView
+            C={C}
+            onGoInitiatives={() => setActiveTab("iniciativas")}
+            onGoBoard={() => setActiveTab("tablero")}
+          />
+        ) : activeTab === "iniciativas" ? (
           <InitiativesView
             C={C}
             initiatives={initiativeStats}
@@ -1149,6 +1163,7 @@ export default function KanbanBoard() {
               setActiveTab("tablero");
             }}
             onEdit={(id) => setOpenInitId(id)}
+            onOpenInfo={() => setActiveTab("info")}
           />
         ) : (
           <>
@@ -1188,7 +1203,27 @@ export default function KanbanBoard() {
               }}
             >
               <div className="fliipa-ini-row" style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
-                <div className="fliipa-row-label" style={rowLabel(C)}>Iniciativa</div>
+                <div className="fliipa-row-label" style={rowLabel(C)}>
+                  Iniciativa
+                  <button
+                    onClick={() => setActiveTab("info")}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: C.accent,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      padding: 0,
+                      marginLeft: 6,
+                      letterSpacing: 0,
+                      textTransform: "none",
+                    }}
+                    title="Qué es una iniciativa"
+                  >
+                    ¿qué es?
+                  </button>
+                </div>
                 <div className="fliipa-pills">
                   <FilterChip
                     C={C}
@@ -1839,6 +1874,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             {[
               { id: "iniciativas", label: "Iniciativas" },
               { id: "tablero", label: "Tablero" },
+              { id: "info", label: "Información" },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -1911,6 +1947,258 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
   );
 }
 
+const INFO_TOPICS = [
+  {
+    id: "mapa",
+    title: "Cómo se organiza",
+    kicker: "El orden del tablero",
+    body: "El trabajo de Fliipa va de lo grande a lo concreto. Primero se define la iniciativa (el objetivo). Luego se crean las tareas (el trabajo de cada persona). Cada tarea se mueve por las columnas hasta Hecho.",
+    steps: [
+      "Crea una iniciativa: el resultado que el equipo quiere lograr.",
+      "Ábrela en el tablero y añade las tareas que hacen falta.",
+      "Mueve cada tarea de Pendiente a Hecho. El % de la iniciativa sube solo.",
+    ],
+  },
+  {
+    id: "iniciativa",
+    title: "Iniciativa",
+    kicker: "El objetivo grande",
+    body: "Una iniciativa es un objetivo de producto, no una tarea del día. Agrupa varias tareas que, juntas, logran algo visible: lanzar un módulo, mejorar el onboarding, cerrar un riesgo. Tiene responsable, estado y un % de avance.",
+    steps: [
+      "Ejemplo: “Pagos en línea”, “Onboarding más claro”, “Cerrar incidencias de septiembre”.",
+      "Pulsa Nueva iniciativa, ponle título y responsable.",
+      "Clic en la fila abre el tablero filtrado solo con sus tareas.",
+      "El lápiz abre el detalle: notas, fecha y estado de la propia iniciativa.",
+    ],
+  },
+  {
+    id: "tarea",
+    title: "Tarea",
+    kicker: "El trabajo concreto",
+    body: "Una tarea es algo que una persona puede hacer y terminar. Vive en una columna, puede tener fecha, responsable y tipo. Lo ideal es vincularla a una iniciativa para que el avance del objetivo sea real.",
+    steps: [
+      "Pulsa Nueva tarea en el tablero. Si ya filtraste una iniciativa, se asigna sola.",
+      "Pon responsable y, si aplica, fecha de vencimiento.",
+      "Clic en la tarjeta abre el detalle: notas, archivos, bloquear, cambiar tipo.",
+      "Una tarea puede quedar “Sin iniciativa”, pero el equipo pierde el hilo del objetivo.",
+    ],
+  },
+  {
+    id: "columnas",
+    title: "Columnas",
+    kicker: "Dónde está cada cosa",
+    body: "Las columnas son el flujo del trabajo. Arrastra la tarjeta o cámbiale el estado en el detalle. El mismo orden vale para iniciativas y para tareas.",
+    steps: [
+      "Pendiente: idea o aún no se arranca.",
+      "Por hacer: ya está lista para que alguien la tome.",
+      "En progreso: se está haciendo ahora.",
+      "En revisión: alguien la está revisando o validando.",
+      "Hecho: terminada. Cuenta 100 % en el avance de la iniciativa.",
+    ],
+  },
+  {
+    id: "tipos",
+    title: "Tipos",
+    kicker: "Qué clase de trabajo es",
+    body: "El tipo (etiqueta de color) dice qué es la tarjeta. No cambia la columna: solo ayuda a filtrar y a entender de un vistazo.",
+    steps: [
+      "Incidencia: algo se rompió o no funciona como debería.",
+      "Funcionalidad: algo nuevo que el producto aún no tiene.",
+      "Tarea: trabajo operativo, de coordinación o seguimiento.",
+      "Mejora: pulir o hacer más claro algo que ya existe.",
+    ],
+  },
+  {
+    id: "tablero",
+    title: "Tablero",
+    kicker: "La vista de columnas",
+    body: "El tablero es el Kanban: columnas con tarjetas. Arriba puedes filtrar por iniciativa, responsable, tipo o texto. Las métricas (vencidas, sin asignar, bloqueadas) cuentan lo que ves en pantalla.",
+    steps: [
+      "Usa “Todas” para ver el trabajo completo del equipo.",
+      "Filtra una iniciativa para concentrarte en un solo objetivo.",
+      "Vencida: pasó la fecha y aún no está en Hecho.",
+      "Bloqueada: alguien marcó que no puede avanzar (candado en la tarjeta).",
+    ],
+  },
+  {
+    id: "avance",
+    title: "% de avance",
+    kicker: "Cómo se mide el progreso",
+    body: "El porcentaje de una iniciativa no se adivina: es el promedio del estado de sus tareas. Pendiente vale 0 %, Por hacer 25 %, En progreso 50 %, En revisión 75 % y Hecho 100 %.",
+    steps: [
+      "Si no hay tareas, puedes ajustar el % a mano con + y − en la fila.",
+      "Cuando hay tareas, el % sigue a las columnas. Mover a Hecho es lo que más sube.",
+      "Una iniciativa en Hecho no cierra sola las tareas: hay que moverlas también.",
+    ],
+  },
+  {
+    id: "papelera",
+    title: "Papelera",
+    kicker: "Nada se pierde",
+    body: "Al eliminar una tarea o una iniciativa no desaparece: pasa a Papelera. Desde ahí se restaura. Lo que está en papelera no vuelve a Plane al migrar.",
+    steps: [
+      "Abre Papelera en la barra de arriba.",
+      "Restaurar la devuelve al tablero con sus datos.",
+      "Si borras por error, no hace falta recrearla desde cero.",
+    ],
+  },
+  {
+    id: "plane",
+    title: "Migrar a Plane",
+    kicker: "Cuando dejen este Kanban",
+    body: "Migrar a Plane copia iniciativas y tareas al proyecto de Plane del equipo. Sirve para dejar de usar este tablero, no para el día a día. Hace falta la API key de Mafe y permiso de escritura.",
+    steps: [
+      "Conectar con el workspace tablero-de-tareas.",
+      "Elegir el proyecto y pulsar Migrar / actualizar.",
+      "Lo vivo se actualiza. Lo que ya borraste en Fliipa se quita de Plane.",
+      "En Plane usa la vista tablero (columnas) y el idioma Español en Preferencias.",
+    ],
+  },
+];
+
+function InfoView({ C, onGoInitiatives, onGoBoard }) {
+  const [topicId, setTopicId] = useState("iniciativa");
+  const topic = INFO_TOPICS.find((item) => item.id === topicId) || INFO_TOPICS[1];
+
+  return (
+    <div>
+      <div
+        style={{
+          background: C.surface,
+          border: `1px solid ${C.borderSoft}`,
+          borderRadius: 16,
+          padding: "20px 22px",
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 6 }}>
+          Cómo se usa el tablero
+        </div>
+        <div style={{ fontSize: 14, color: C.textMuted, lineHeight: 1.55, maxWidth: 720 }}>
+          Una <strong style={{ color: C.text, fontWeight: 600 }}>iniciativa</strong> es el objetivo.
+          Las <strong style={{ color: C.text, fontWeight: 600 }}>tareas</strong> son el trabajo para lograrlo.
+          Las <strong style={{ color: C.text, fontWeight: 600 }}>columnas</strong> dicen en qué punto va cada una.
+          Elige un tema a la izquierda para ver la explicación completa.
+        </div>
+        <div className="fliipa-info-cards" style={{ marginTop: 16 }}>
+          {[
+            { title: "1. Iniciativa", text: "El resultado que el equipo quiere.", go: onGoInitiatives, label: "Ir a Iniciativas" },
+            { title: "2. Tareas", text: "El trabajo de cada persona, con fecha y tipo.", go: onGoBoard, label: "Ir al Tablero" },
+            { title: "3. Columnas", text: "Pendiente → Por hacer → En progreso → En revisión → Hecho." },
+            { title: "4. Avance", text: "El % de la iniciativa sube al mover sus tareas." },
+          ].map((card) => (
+            <div
+              key={card.title}
+              style={{
+                background: C.surfaceRaised,
+                border: `1px solid ${C.borderSoft}`,
+                borderRadius: 12,
+                padding: "12px 14px",
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{card.title}</div>
+              <div style={{ fontSize: 12.5, color: C.textMuted, lineHeight: 1.45 }}>{card.text}</div>
+              {card.go && (
+                <button
+                  onClick={card.go}
+                  style={{
+                    marginTop: 8,
+                    background: "none",
+                    border: "none",
+                    color: C.accent,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {card.label}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="fliipa-info-grid">
+        <div
+          className="fliipa-info-nav"
+          style={{
+            background: C.surface,
+            border: `1px solid ${C.borderSoft}`,
+            borderRadius: 14,
+            padding: 10,
+          }}
+        >
+          {INFO_TOPICS.map((item) => {
+            const active = item.id === topic.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setTopicId(item.id)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  background: active ? C.accentSoft : "none",
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "9px 12px",
+                  cursor: "pointer",
+                  color: active ? C.text : C.textMuted,
+                  fontWeight: active ? 700 : 500,
+                  fontSize: 13.5,
+                }}
+              >
+                {item.title}
+              </button>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            background: C.surface,
+            border: `1px solid ${C.borderSoft}`,
+            borderRadius: 14,
+            padding: "22px 24px 24px",
+            minHeight: 280,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.accent, marginBottom: 6 }}>
+            {topic.kicker}
+          </div>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700, marginBottom: 10 }}>
+            {topic.title}
+          </div>
+          <div style={{ fontSize: 14.5, color: C.textMuted, lineHeight: 1.6, marginBottom: 16 }}>{topic.body}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {topic.steps.map((step) => (
+              <div
+                key={step}
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-start",
+                  background: C.surfaceRaised,
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  fontSize: 13.5,
+                  lineHeight: 1.45,
+                  color: C.text,
+                }}
+              >
+                <span style={{ color: C.accent, fontWeight: 700, flexShrink: 0 }}>·</span>
+                <span>{step}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InitiativesView({
   C,
   initiatives,
@@ -1924,6 +2212,7 @@ function InitiativesView({
   onAdjustProgress,
   onOpenBoard,
   onEdit,
+  onOpenInfo,
 }) {
   return (
     <div>
@@ -1954,6 +2243,25 @@ function InitiativesView({
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Iniciativas estratégicas de Fliipa</div>
           <div style={{ fontSize: 13, color: C.textMuted }}>
             % de avance sube al mover las tareas de columna (Pendiente 0% → Por hacer 25% → En progreso 50% → En revisión 75% → Hecho 100%). Clic en una fila abre su tablero.
+            {onOpenInfo && (
+              <>
+                {" "}
+                <button
+                  onClick={onOpenInfo}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: C.accent,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  Qué es una iniciativa
+                </button>
+              </>
+            )}
           </div>
         </div>
         <button
@@ -2479,7 +2787,10 @@ function AddInitiativeModal({ C, assignees, onClose, onSave }) {
       style={{ position: "fixed", inset: 0, background: "rgba(8,10,14,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}
     >
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 380, padding: 20 }}>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 16 }}>Nueva iniciativa</div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 6 }}>Nueva iniciativa</div>
+        <div style={{ fontSize: 12.5, color: C.textMuted, lineHeight: 1.45, marginBottom: 14 }}>
+          Un objetivo grande del producto. Después le agregas tareas en el tablero.
+        </div>
 
         <label style={label}>Título</label>
         <input
@@ -3635,7 +3946,10 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
         className="fliipa-modal-pad"
         style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 440, padding: 20, maxHeight: "90vh", overflowY: "auto" }}
       >
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 16 }}>Nueva tarea</div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 6 }}>Nueva tarea</div>
+        <div style={{ fontSize: 12.5, color: C.textMuted, lineHeight: 1.45, marginBottom: 14 }}>
+          Un trabajo concreto. Si la vinculas a una iniciativa, el % de avance de esa iniciativa sube al moverla.
+        </div>
 
         <label style={label}>Título</label>
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="¿Qué hay que hacer?" style={input} />
