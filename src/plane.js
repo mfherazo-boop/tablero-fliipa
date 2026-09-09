@@ -17,6 +17,14 @@ const COLUMN_HINTS = {
   done: { groups: ["completed"], names: ["done", "hecho", "completed", "complete", "cerrado"] },
 };
 
+const FLIIPA_STATE_STYLE = {
+  backlog: { name: "Backlog", color: "#C5CAD8" },
+  todo: { name: "Por hacer", color: "#8B8CFF" },
+  in_progress: { name: "En progreso", color: "#5B8CFF" },
+  review: { name: "En revisión", color: "#B48EDE" },
+  done: { name: "Hecho", color: "#3EE0B4" },
+};
+
 export function normalizeBase(url) {
   const raw = String(url || DEFAULT_PLANE_BASE).trim().replace(/\/+$/, "");
   if (/^https?:\/\/app\.plane\.so$/i.test(raw)) return DEFAULT_PLANE_BASE;
@@ -254,6 +262,77 @@ async function ensureReviewState(cfg, states) {
   }
 }
 
+async function patchState(cfg, state, body) {
+  if (!state?.id) return state;
+  const nextName = body.name;
+  const nextColor = body.color;
+  if (nextName && String(state.name) === nextName && (!nextColor || String(state.color || "").toLowerCase() === nextColor.toLowerCase())) {
+    return state;
+  }
+  const updated = await planeRequest({
+    ...cfg,
+    method: "PATCH",
+    path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/states/${state.id}/`,
+    body,
+  });
+  Object.assign(state, updated || body);
+  return state;
+}
+
+async function alignPlaneStates(cfg, states) {
+  await ensureReviewState(cfg, states);
+  for (const columnId of ["backlog", "todo", "in_progress", "review", "done"]) {
+    const style = FLIIPA_STATE_STYLE[columnId];
+    const state = matchState(states, columnId);
+    if (!state || !style) continue;
+    try {
+      await patchState(cfg, state, { name: style.name, color: style.color });
+    } catch (e) {
+      /* el nombre puede chocar si ya existe otro estado igual */
+    }
+    await sleep(120);
+  }
+  const cancelled = (states || []).find((s) => s.group === "cancelled");
+  if (cancelled) {
+    try {
+      await patchState(cfg, cancelled, { name: "Cancelado", color: "#E2574C" });
+    } catch (e) {
+      /* ignore */
+    }
+  }
+}
+
+async function preferBoardLayout(cfg) {
+  const viewsPath = `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/views/?per_page=50`;
+  try {
+    const views = resultsOf(await planeRequest({ ...cfg, path: viewsPath }));
+    const view =
+      views.find((v) => v.is_default) ||
+      views.find((v) => /work items|all issues|todas/i.test(v.name || "")) ||
+      views[0];
+    if (!view?.id) return;
+    const filters = { ...(view.display_filters || {}), layout: "kanban", group_by: "state" };
+    try {
+      await planeRequest({
+        ...cfg,
+        method: "PATCH",
+        path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/views/${view.id}/`,
+        body: { display_filters: filters },
+      });
+    } catch (e) {
+      filters.layout = "board";
+      await planeRequest({
+        ...cfg,
+        method: "PATCH",
+        path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/views/${view.id}/`,
+        body: { display_filters: filters },
+      });
+    }
+  } catch (e) {
+    /* Plane no siempre deja cambiar la vista por API; el usuario puede pulsar Tablero */
+  }
+}
+
 function buildTaskHtml(task, initiative) {
   const lines = [];
   if (task.description) {
@@ -432,7 +511,12 @@ export async function migrateToPlane({
     members = [];
   }
 
-  await ensureReviewState(cfg, states);
+  await alignPlaneStates(cfg, states);
+  try {
+    await preferBoardLayout(cfg);
+  } catch (e) {
+    /* ignore */
+  }
   const stateMap = {
     backlog: matchState(states, "backlog"),
     todo: matchState(states, "todo"),

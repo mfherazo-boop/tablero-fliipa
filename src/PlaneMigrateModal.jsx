@@ -257,7 +257,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
             </li>
           </ol>
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, fontSize: 12.5 }}>
-            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> las iniciativas y tareas se copian como work items (columnas Backlog → Hecho). Si conectas con la API, las tareas de una iniciativa quedan como subtareas. Si usas CSV, van como ítems sueltos y las iniciativas llevan el prefijo [Iniciativa]. Este Kanban no se borra.
+            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> arriba a la derecha cambia de Lista al icono de <strong style={{ color: C.text }}>tablero</strong> (columnas). Al migrar, las columnas se llaman como aquí: Backlog, Por hacer, En progreso, En revisión, Hecho. Las tareas de una iniciativa quedan como subtareas. Este Kanban no se borra.
           </div>
         </div>
 
