@@ -80,17 +80,21 @@ function isGithubPages() {
   return typeof window !== "undefined" && /\.github\.io$/i.test(window.location.hostname);
 }
 
+const HOSTED_PLANE_PROXY = "https://tablero-fliipa-plane.excited-marshmallow.workers.dev";
+
 function planeProxyUrls() {
-  if (isGithubPages()) return [];
   const urls = [];
   if (typeof window !== "undefined") {
     const base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "/";
     try {
-      urls.push(new URL("api/plane", window.location.origin + (base.endsWith("/") ? base : `${base}/`)).toString());
+      const local = new URL("api/plane", window.location.origin + (base.endsWith("/") ? base : `${base}/`)).toString();
+      if (!isGithubPages()) urls.push(local);
     } catch (e) {
       /* ignore */
     }
   }
+  const hosted = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_PLANE_PROXY) || HOSTED_PLANE_PROXY;
+  if (hosted) urls.push(hosted);
   return urls;
 }
 

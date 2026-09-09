@@ -1,0 +1,3 @@
+name = "tablero-fliipa-plane"
+main = "workers/plane-proxy.js"
+compatibility_date = "2026-09-09"
