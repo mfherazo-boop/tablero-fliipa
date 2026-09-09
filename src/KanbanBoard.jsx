@@ -1043,6 +1043,30 @@ export default function KanbanBoard() {
         }
         .fliipa-init-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .fliipa-modal-pad { padding: 20px; }
+        .fliipa-side-scrim {
+          position: fixed !important;
+          inset: 0 !important;
+          background: rgba(8, 10, 14, 0.42) !important;
+          z-index: 80 !important;
+          display: block !important;
+          padding: 0 !important;
+        }
+        .fliipa-side-panel {
+          position: fixed !important;
+          top: 0 !important;
+          right: 0 !important;
+          bottom: 0 !important;
+          left: auto !important;
+          width: 400px !important;
+          max-width: 86vw !important;
+          height: 100% !important;
+          margin: 0 !important;
+          border-radius: 0 !important;
+          transform: none !important;
+          z-index: 81 !important;
+          overflow-y: auto;
+          box-sizing: border-box;
+        }
         @media (max-width: 1100px) {
           .fliipa-page { padding: 16px 16px 32px; }
           .fliipa-updated, .fliipa-subtitle { display: none !important; }
@@ -1099,10 +1123,19 @@ export default function KanbanBoard() {
             min-height: 340px !important;
             scroll-snap-align: start;
           }
-          .fliipa-drawer {
-            width: 100% !important;
-            border-left: none !important;
-          }
+        .fliipa-drawer {
+          width: 100% !important;
+          border-left: none !important;
+        }
+        .fliipa-side-panel {
+          width: min(400px, 86vw) !important;
+          right: 0 !important;
+          left: auto !important;
+          top: 0 !important;
+          bottom: 0 !important;
+          height: 100% !important;
+          border-radius: 0 !important;
+        }
           .fliipa-init-head { display: none !important; }
           .fliipa-init-row {
             min-width: 0 !important;
@@ -2776,23 +2809,26 @@ function AddInitiativeModal({ C, assignees, onClose, onSave }) {
     onSave({ title: title.trim(), owner: finalOwner, progress });
   }
 
-  const label = labelStyle(C);
+  const label = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: C.textFaint,
+    marginTop: 16,
+    marginBottom: 7,
+  };
   const input = inputStyle(C);
-  const ghost = ghostBtn(C);
   const primary = primaryBtn(C);
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(8,10,14,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}
-    >
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 380, padding: 20 }}>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 6 }}>Nueva iniciativa</div>
-        <div style={{ fontSize: 12.5, color: C.textMuted, lineHeight: 1.45, marginBottom: 14 }}>
+    <SideDrawer C={C} title="Nueva iniciativa" onClose={onClose}>
+        <div style={{ fontSize: 12.5, color: C.textMuted, lineHeight: 1.45, marginBottom: 8 }}>
           Un objetivo grande del producto. Después le agregas tareas en el tablero.
         </div>
 
-        <label style={label}>Título</label>
+        <label style={{ ...label, marginTop: 10 }}>Título</label>
         <input
           autoFocus
           value={title}
@@ -2831,16 +2867,20 @@ function AddInitiativeModal({ C, assignees, onClose, onSave }) {
           style={{ width: "100%" }}
         />
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-          <button onClick={onClose} style={ghost}>
-            Cancelar
-          </button>
-          <button onClick={handleSave} style={primary}>
-            Crear iniciativa
-          </button>
-        </div>
-      </div>
-    </div>
+        <button
+          onClick={handleSave}
+          disabled={!title.trim()}
+          style={{
+            ...primary,
+            marginTop: 22,
+            padding: "10px 18px",
+            opacity: title.trim() ? 1 : 0.55,
+            cursor: title.trim() ? "pointer" : "not-allowed",
+          }}
+        >
+          Crear iniciativa
+        </button>
+    </SideDrawer>
   );
 }
 
@@ -3865,6 +3905,62 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
   );
 }
 
+function SideDrawer({ C, title, onClose, disableClose, children }) {
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape" && !disableClose) onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, disableClose]);
+
+  return (
+    <div
+      className="fliipa-side-scrim"
+      onClick={() => {
+        if (!disableClose) onClose();
+      }}
+    >
+      <aside
+        className="fliipa-side-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: C.surface,
+          color: C.text,
+          borderLeft: `1px solid ${C.border}`,
+          boxShadow: "-16px 0 48px rgba(0,0,0,0.35)",
+          padding: "22px 24px 32px",
+          animation: "fliipaDrawerIn 180ms ease-out",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700 }}>{title}</div>
+          <button
+            onClick={onClose}
+            disabled={disableClose}
+            aria-label="Cerrar"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textFaint,
+              cursor: disableClose ? "not-allowed" : "pointer",
+              fontSize: 20,
+              lineHeight: 1,
+              padding: 4,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        {children}
+      </aside>
+    </div>
+  );
+}
+
 function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose, onSave }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -3881,14 +3977,6 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
   const [blocked, setBlocked] = useState(false);
   const fileInputRef = useRef(null);
   const useCustom = assignee === "__custom__";
-
-  useEffect(() => {
-    function onKey(e) {
-      if (e.key === "Escape" && !saving) onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, saving]);
 
   async function addFiles(fileList) {
     const files = Array.from(fileList || []);
@@ -3954,55 +4042,7 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
   const canSave = Boolean(title.trim()) && !saving;
 
   return (
-    <div
-      onClick={() => {
-        if (!saving) onClose();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(8,10,14,0.45)",
-        display: "flex",
-        justifyContent: "flex-end",
-        zIndex: 50,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Nueva tarea"
-        className="fliipa-drawer"
-        style={{
-          width: "min(400px, 100%)",
-          height: "100%",
-          background: C.surface,
-          borderLeft: `1px solid ${C.border}`,
-          boxShadow: "-12px 0 40px rgba(0,0,0,0.28)",
-          overflowY: "auto",
-          padding: "22px 24px 28px",
-          animation: "fliipaDrawerIn 180ms ease-out",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700 }}>Nueva tarea</div>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            aria-label="Cerrar"
-            style={{
-              background: "none",
-              border: "none",
-              color: C.textFaint,
-              cursor: saving ? "not-allowed" : "pointer",
-              fontSize: 20,
-              lineHeight: 1,
-              padding: 4,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-
+    <SideDrawer C={C} title="Nueva tarea" onClose={onClose} disableClose={saving}>
         <label style={{ ...label, marginTop: 10 }}>Título</label>
         <input
           autoFocus
@@ -4175,8 +4215,7 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
         >
           {saving ? "Subiendo…" : "Crear tarea"}
         </button>
-      </div>
-    </div>
+    </SideDrawer>
   );
 }
 
