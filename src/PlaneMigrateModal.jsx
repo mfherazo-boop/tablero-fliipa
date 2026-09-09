@@ -182,9 +182,43 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
           que elijan. No borra ni deja de sincronizar este tablero: Fliipa sigue siendo la fuente de trabajo
           hasta que decidan quedarse solo en Plane.
         </div>
-        <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 8 }}>
+        <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 10 }}>
           Ahora mismo hay {tasks.length} tarea{tasks.length === 1 ? "" : "s"} y {initiatives.length} iniciativa{initiatives.length === 1 ? "" : "s"}
           {already ? ` · ${already} ya vinculadas a Plane` : ""}.
+        </div>
+
+        <div
+          style={{
+            background: C.surfaceRaised,
+            border: `1px solid ${C.borderSoft}`,
+            borderRadius: 10,
+            padding: "12px 14px",
+            marginBottom: 12,
+            fontSize: 13,
+            color: C.textMuted,
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textFaint, marginBottom: 8 }}>
+            Cómo hacerlo
+          </div>
+          <ol style={{ margin: 0, paddingLeft: 18 }}>
+            <li style={{ marginBottom: 6 }}>
+              En <a href="https://app.plane.so" target="_blank" rel="noreferrer" style={{ color: C.accent }}>app.plane.so</a> entra a tu workspace y ten un proyecto creado (puede estar vacío).
+            </li>
+            <li style={{ marginBottom: 6 }}>
+              Ve a <strong style={{ color: C.text, fontWeight: 600 }}>Profile Settings → Personal Access Tokens</strong>, crea un token y cópialo.
+            </li>
+            <li style={{ marginBottom: 6 }}>
+              El workspace es el texto de la URL: <span style={{ color: C.text }}>app.plane.so/<strong>tu-workspace</strong>/</span>
+            </li>
+            <li>
+              Pégalo abajo, pulsa <strong style={{ color: C.text, fontWeight: 600 }}>Conectar y ver proyectos</strong>, elige el proyecto y <strong style={{ color: C.text, fontWeight: 600 }}>Migrar a Plane</strong>.
+            </li>
+          </ol>
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, fontSize: 12.5 }}>
+            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> cada iniciativa queda como un work item con etiqueta “Iniciativa”. Cada tarea queda como work item (Bug, Feature, Tarea o Mejora). Si la tarea pertenece a una iniciativa, en Plane aparece como <em>subtarea</em>. Las columnas se copian (Backlog → Hecho). Este Kanban no se borra.
+          </div>
         </div>
 
         <label style={label(C)}>URL de Plane</label>
