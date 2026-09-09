@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
+import planeHandler from "./api/plane.js";
 
 function localBoardApi() {
   const file = path.resolve("data/board.json");
@@ -34,7 +35,18 @@ function localBoardApi() {
   };
 }
 
+function planeApiProxy() {
+  return {
+    name: "plane-api-proxy",
+    configureServer(server) {
+      server.middlewares.use("/api/plane", (req, res) => {
+        planeHandler(req, res);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: process.env.VITE_BASE || "/",
-  plugins: [react(), localBoardApi()],
+  plugins: [react(), localBoardApi(), planeApiProxy()],
 });

@@ -52,15 +52,49 @@ function escapeHtml(text) {
 }
 
 export async function planeRequest({ baseUrl, apiKey, path, method = "GET", body }) {
-  const res = await fetch(`${normalizeBase(baseUrl)}/api/v1${path}`, {
-    method,
-    headers: {
-      "X-API-Key": apiKey,
-      Accept: "application/json",
-      ...(body ? { "Content-Type": "application/json" } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let lastErr = null;
+  const proxies = planeProxyUrls();
+  for (const proxy of proxies) {
+    try {
+      return await planeRequestViaProxy(proxy, { baseUrl, apiKey, path, method, body });
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  try {
+    return await planeRequestDirect({ baseUrl, apiKey, path, method, body });
+  } catch (e) {
+    if (e.name === "TypeError" || /Failed to fetch|NetworkError|CORS/i.test(e.message || "")) {
+      const err = new Error(
+        "El navegador no puede hablar con Plane (CORS). Descarga el CSV e impórtalo en Plane: Workspace Settings → Imports → CSV."
+      );
+      err.code = "PLANE_BROWSER_BLOCKED";
+      err.cause = lastErr || e;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+function isGithubPages() {
+  return typeof window !== "undefined" && /\.github\.io$/i.test(window.location.hostname);
+}
+
+function planeProxyUrls() {
+  if (isGithubPages()) return [];
+  const urls = [];
+  if (typeof window !== "undefined") {
+    const base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "/";
+    try {
+      urls.push(new URL("api/plane", window.location.origin + (base.endsWith("/") ? base : `${base}/`)).toString());
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return urls;
+}
+
+async function parsePlaneResponse(res) {
   const text = await res.text();
   let data = null;
   try {
@@ -79,6 +113,34 @@ export async function planeRequest({ baseUrl, apiKey, path, method = "GET", body
     throw err;
   }
   return data;
+}
+
+async function planeRequestViaProxy(proxyUrl, { baseUrl, apiKey, path, method, body }) {
+  const res = await fetch(proxyUrl, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ baseUrl, apiKey, path, method, body }),
+  });
+  const type = (res.headers.get("content-type") || "").toLowerCase();
+  if (!type.includes("json")) {
+    const err = new Error("Este visor no tiene puente hacia Plane.");
+    err.status = res.status;
+    throw err;
+  }
+  return parsePlaneResponse(res);
+}
+
+async function planeRequestDirect({ baseUrl, apiKey, path, method, body }) {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api/v1${path}`, {
+    method,
+    headers: {
+      "X-API-Key": apiKey,
+      Accept: "application/json",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return parsePlaneResponse(res);
 }
 
 export async function listProjects(cfg) {
@@ -298,6 +360,52 @@ export function buildMigrationPackage({ tasks, initiatives }) {
       planeWorkItemId: i.planeWorkItemId || null,
     })),
   };
+}
+
+function csvCell(value) {
+  const text = String(value == null ? "" : value);
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+const STATE_GROUP = {
+  backlog: "backlog",
+  todo: "unstarted",
+  in_progress: "started",
+  review: "started",
+  done: "completed",
+};
+
+export function buildPlaneCsv({ tasks, initiatives }) {
+  const header = ["name", "description_html", "priority", "start_date", "target_date", "state_group"];
+  const rows = [header.join(",")];
+  (initiatives || []).forEach((ini) => {
+    const title = ini.title ? `[Iniciativa] ${ini.title}` : "[Iniciativa]";
+    rows.push(
+      [
+        csvCell(title),
+        csvCell(buildInitiativeHtml(ini)),
+        "none",
+        "",
+        csvCell(ini.dueDate || ""),
+        STATE_GROUP[ini.status] || "backlog",
+      ].join(",")
+    );
+  });
+  (tasks || []).forEach((task) => {
+    const initiative = (initiatives || []).find((ini) => sameId(ini.id, task.initiativeId));
+    rows.push(
+      [
+        csvCell(task.title || "Sin título"),
+        csvCell(buildTaskHtml(task, initiative)),
+        task.blocked ? "high" : "none",
+        "",
+        csvCell(task.dueDate || ""),
+        STATE_GROUP[task.status] || "unstarted",
+      ].join(",")
+    );
+  });
+  return `\uFEFF${rows.join("\n")}`;
 }
 
 export async function migrateToPlane({

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   DEFAULT_PLANE_BASE,
   buildMigrationPackage,
+  buildPlaneCsv,
   listProjects,
   migrateToPlane,
   parseWorkspaceInput,
@@ -26,8 +27,7 @@ function saveSettings(next) {
   }
 }
 
-function downloadJson(filename, data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+function downloadBlob(filename, blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -36,6 +36,18 @@ function downloadJson(filename, data) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function downloadJson(filename, data) {
+  downloadBlob(filename, new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+}
+
+function isBrowserBlocked(error) {
+  return (
+    error?.code === "PLANE_BROWSER_BLOCKED" ||
+    error?.name === "TypeError" ||
+    /Failed to fetch|NetworkError|CORS|no puede hablar con Plane/i.test(error?.message || "")
+  );
 }
 
 export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onItemMigrated }) {
@@ -49,6 +61,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState(null);
   const [summary, setSummary] = useState(null);
+  const [corsBlocked, setCorsBlocked] = useState(false);
 
   const totalItems = (tasks || []).length + (initiatives || []).length;
   const already = (tasks || []).filter((t) => t.planeWorkItemId).length + (initiatives || []).filter((i) => i.planeWorkItemId).length;
@@ -107,6 +120,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
     setStatus("connecting");
     setMessage("");
     setSummary(null);
+    setCorsBlocked(false);
     try {
       const list = await listProjects({
         baseUrl,
@@ -120,8 +134,11 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
       setMessage(list.length ? `Conectado. ${list.length} proyecto${list.length === 1 ? "" : "s"} encontrado${list.length === 1 ? "" : "s"}.` : "Conectado, pero no hay proyectos en ese workspace.");
     } catch (e) {
       setStatus("error");
-      if (e.name === "TypeError" || /Failed to fetch|NetworkError|CORS/i.test(e.message || "")) {
-        setMessage("El navegador no pudo hablar con Plane (suele ser CORS). Descarga el paquete y migra desde una computadora con Node, o usa una instancia de Plane que permita este origen.");
+      if (isBrowserBlocked(e)) {
+        setCorsBlocked(true);
+        setMessage(
+          "Plane no deja conectar desde este visor (el navegador bloquea la API). No hace falta Node: descarga el CSV e impórtalo en Plane."
+        );
       } else {
         setMessage(e.message || "No se pudo conectar con Plane.");
       }
@@ -137,6 +154,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
     setStatus("migrating");
     setMessage("");
     setSummary(null);
+    setCorsBlocked(false);
     persistConnection(projectId);
     try {
       const result = await migrateToPlane({
@@ -160,12 +178,27 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
     } catch (e) {
       setStatus("error");
       setProgress(null);
-      setMessage(e.message || "La migración falló.");
+      if (isBrowserBlocked(e)) {
+        setCorsBlocked(true);
+        setMessage(
+          "Plane no deja conectar desde este visor (el navegador bloquea la API). Descarga el CSV e impórtalo en Plane."
+        );
+      } else {
+        setMessage(e.message || "La migración falló.");
+      }
     }
   }
 
   function handleDownload() {
     downloadJson(`fliipa-para-plane-${new Date().toISOString().slice(0, 10)}.json`, buildMigrationPackage({ tasks, initiatives }));
+  }
+
+  function handleDownloadCsv() {
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(
+      `fliipa-para-plane-${stamp}.csv`,
+      new Blob([buildPlaneCsv({ tasks, initiatives })], { type: "text/csv;charset=utf-8" })
+    );
   }
 
   const selectedName = (projects.find((p) => p.id === projectId) || {}).name;
@@ -220,11 +253,11 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
               El workspace es el texto de la URL: <span style={{ color: C.text }}>app.plane.so/<strong>tu-workspace</strong>/</span>
             </li>
             <li>
-              Pégalo abajo, pulsa <strong style={{ color: C.text, fontWeight: 600 }}>Conectar y ver proyectos</strong>, elige el proyecto y <strong style={{ color: C.text, fontWeight: 600 }}>Migrar a Plane</strong>.
+              Pégalo abajo y pulsa <strong style={{ color: C.text, fontWeight: 600 }}>Conectar y ver proyectos</strong>. Si el visor no deja hablar con Plane, usa <strong style={{ color: C.text, fontWeight: 600 }}>Descargar CSV para Plane</strong> y en Plane ve a Workspace Settings → Imports → CSV.
             </li>
           </ol>
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, fontSize: 12.5 }}>
-            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> cada iniciativa queda como un work item con etiqueta “Iniciativa”. Cada tarea queda como work item (Bug, Feature, Tarea o Mejora). Si la tarea pertenece a una iniciativa, en Plane aparece como <em>subtarea</em>. Las columnas se copian (Backlog → Hecho). Este Kanban no se borra.
+            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> las iniciativas y tareas se copian como work items (columnas Backlog → Hecho). Si conectas con la API, las tareas de una iniciativa quedan como subtareas. Si usas CSV, van como ítems sueltos y las iniciativas llevan el prefijo [Iniciativa]. Este Kanban no se borra.
           </div>
         </div>
 
@@ -292,6 +325,30 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
           </div>
         )}
 
+        {corsBlocked && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: "12px 14px",
+              borderRadius: 10,
+              background: C.surfaceRaised,
+              border: `1px solid ${C.accent}`,
+              fontSize: 13,
+              color: C.textMuted,
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ color: C.text, fontWeight: 600, marginBottom: 6 }}>Importar con CSV (sin Node)</div>
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              <li style={{ marginBottom: 4 }}>Pulsa <strong style={{ color: C.text }}>Descargar CSV para Plane</strong>.</li>
+              <li style={{ marginBottom: 4 }}>
+                En Plane: <strong style={{ color: C.text }}>Workspace Settings → Imports → CSV</strong>.
+              </li>
+              <li>Elige el proyecto y sube el archivo. Las iniciativas van con el prefijo [Iniciativa].</li>
+            </ol>
+          </div>
+        )}
+
         {summary && (
           <div style={{ fontSize: 13, color: C.textMuted, marginTop: 10, lineHeight: 1.5 }}>
             Creadas: {summary.created} · Actualizadas: {summary.updated} · Fallidas: {summary.failed}
@@ -311,9 +368,14 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
         )}
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
-          <button onClick={handleDownload} style={ghost}>
-            Descargar paquete
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={handleDownloadCsv} style={corsBlocked ? primary : ghost}>
+              Descargar CSV para Plane
+            </button>
+            <button onClick={handleDownload} style={ghost}>
+              Descargar paquete
+            </button>
+          </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={onClose} style={ghost} disabled={status === "migrating"}>
               Cerrar
