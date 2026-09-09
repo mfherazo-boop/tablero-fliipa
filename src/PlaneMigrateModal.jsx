@@ -91,6 +91,18 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
     });
   }
 
+  const workspaceSlug = parseWorkspaceInput(workspace);
+  const canConnect = Boolean(apiKey.trim() && workspaceSlug);
+  const canMigrate = Boolean(canConnect && projectId && totalItems);
+
+  function missingHint() {
+    if (!apiKey.trim()) return "Pega la API key que acabas de generar en Plane.";
+    if (!workspaceSlug) return "Falta el workspace: es el nombre de la URL de Plane, por ejemplo app.plane.so/fliipa/ → escribe fliipa.";
+    if (!projectId) return "Pulsa «Conectar y ver proyectos» y elige el proyecto destino. Todavía no pulses Migrar.";
+    if (!totalItems) return "No hay tareas ni iniciativas para migrar.";
+    return "";
+  }
+
   async function handleConnect() {
     setStatus("connecting");
     setMessage("");
@@ -117,13 +129,8 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
   }
 
   async function handleMigrate() {
-    if (!apiKey.trim() || !parseWorkspaceInput(workspace) || !projectId) {
-      setMessage("Completa API key, workspace y proyecto.");
-      setStatus("error");
-      return;
-    }
-    if (!totalItems) {
-      setMessage("No hay tareas ni iniciativas para migrar.");
+    if (!canMigrate) {
+      setMessage(missingHint());
       setStatus("error");
       return;
     }
@@ -236,7 +243,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
         <input
           value={workspace}
           onChange={(e) => setWorkspace(e.target.value)}
-          placeholder="slug o URL, ej. fliipa o https://app.plane.so/fliipa/"
+          placeholder="fliipa  (el texto de app.plane.so/fliipa/)"
           style={input}
         />
 
@@ -254,7 +261,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-          <button onClick={handleConnect} style={ghost} disabled={status === "connecting" || status === "migrating"}>
+          <button onClick={handleConnect} style={ghost} disabled={!canConnect || status === "connecting" || status === "migrating"}>
             {status === "connecting" ? "Conectando…" : "Conectar y ver proyectos"}
           </button>
         </div>
@@ -313,10 +320,11 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
             </button>
             <button
               onClick={handleMigrate}
-              style={{ ...primary, opacity: status === "migrating" ? 0.7 : 1 }}
-              disabled={status === "migrating" || !totalItems}
+              style={{ ...primary, opacity: canMigrate && status !== "migrating" ? 1 : 0.55 }}
+              disabled={!canMigrate || status === "migrating"}
+              title={!canMigrate ? missingHint() : ""}
             >
-              {status === "migrating" ? "Migrando…" : already ? "Migrar / actualizar" : "Migrar a Plane"}
+              {status === "migrating" ? "Migrando…" : !projectId ? "Elige un proyecto" : already ? "Migrar / actualizar" : "Migrar a Plane"}
             </button>
           </div>
         </div>
