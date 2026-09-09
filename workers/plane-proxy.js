@@ -69,6 +69,9 @@ export default {
         },
         body: incoming.body ? JSON.stringify(incoming.body) : undefined,
       });
+      if (proxied.status === 204 || proxied.status === 205) {
+        return json(200, { ok: true });
+      }
       const text = await proxied.text();
       return new Response(text || "{}", {
         status: proxied.status,

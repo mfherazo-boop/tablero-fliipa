@@ -59,6 +59,23 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;");
 }
 
+export function isPlaneGoneError(e) {
+  if (!e) return false;
+  if (e.status === 404 || e.status === 410) return true;
+  const msg = `${e.message || ""} ${e.data?.detail || ""} ${e.data?.error || ""}`.toLowerCase();
+  return /not found|does not exist|no (encontrado|existe)|page not found/.test(msg);
+}
+
+export function isRetryableProxyError(e) {
+  if (!e) return true;
+  if (typeof e.status === "number") {
+    if (e.status === 502 || e.status === 503 || e.status === 504) return true;
+    return false;
+  }
+  if (e.name === "TypeError") return true;
+  return /failed to fetch|networkerror|cors|puente hacia plane/i.test(e.message || "");
+}
+
 export async function planeRequest({ baseUrl, apiKey, path, method = "GET", body }) {
   let lastErr = null;
   const proxies = planeProxyUrls();
@@ -67,12 +84,14 @@ export async function planeRequest({ baseUrl, apiKey, path, method = "GET", body
       return await planeRequestViaProxy(proxy, { baseUrl, apiKey, path, method, body });
     } catch (e) {
       lastErr = e;
+      if (!isRetryableProxyError(e)) throw e;
     }
   }
   try {
     return await planeRequestDirect({ baseUrl, apiKey, path, method, body });
   } catch (e) {
     if (e.name === "TypeError" || /Failed to fetch|NetworkError|CORS/i.test(e.message || "")) {
+      if (lastErr && !isRetryableProxyError(lastErr)) throw lastErr;
       const err = new Error(
         "El navegador no puede hablar con Plane (CORS). Descarga el CSV e impórtalo en Plane: Workspace Settings → Imports → CSV."
       );
@@ -313,13 +332,30 @@ async function alignPlaneStates(cfg, states) {
     }
     await sleep(120);
   }
-  const cancelled = (states || []).find((s) => s.group === "cancelled");
+  await ensureCancelledState(cfg, states);
+}
+
+async function ensureCancelledState(cfg, states) {
+  let cancelled = (states || []).find((s) => s.group === "cancelled" || /cancel/i.test(s.name || ""));
   if (cancelled) {
     try {
       await patchState(cfg, cancelled, { name: "Cancelado", color: "#E2574C" });
     } catch (e) {
       /* ignore */
     }
+    return cancelled;
+  }
+  try {
+    const created = await planeRequest({
+      ...cfg,
+      method: "POST",
+      path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/states/`,
+      body: { name: "Cancelado", color: "#E2574C", group: "cancelled" },
+    });
+    if (created?.id) states.push(created);
+    return created;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -461,53 +497,67 @@ export function isPlaneOnboarding(item) {
   );
 }
 
-async function removeWorkItem(cfg, item, cancelledStateId) {
-  const id = item.id;
-  const attempts = [
-    { method: "DELETE", path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/${id}/` },
-    { method: "DELETE", path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/issues/${id}/` },
-  ];
-  for (const attempt of attempts) {
-    try {
-      await planeRequest({ ...cfg, ...attempt });
-      return true;
-    } catch (e) {
-      if (e.status === 404) return true;
-    }
-  }
-  if (cancelledStateId) {
-    try {
-      await planeRequest({
-        ...cfg,
-        method: "PATCH",
-        path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/${id}/`,
-        body: { state: cancelledStateId },
-      });
-    } catch (e) {
-      /* sigue al archivo */
-    }
-  }
+async function tryPlane(cfg, extra) {
   try {
-    await planeRequest({
-      ...cfg,
-      method: "POST",
-      path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/${id}/archive/`,
-    });
-    return true;
+    return { ok: true, data: await planeRequest({ ...cfg, ...extra }) };
   } catch (e) {
-    /* ignore */
+    if (isPlaneGoneError(e)) return { ok: true, gone: true };
+    return { ok: false, error: e };
   }
-  try {
-    await planeRequest({
-      ...cfg,
+}
+
+function workItemPaths(cfg, id) {
+  const ws = encodeURIComponent(cfg.workspace);
+  return [
+    `/workspaces/${ws}/projects/${cfg.projectId}/work-items/${id}/`,
+    `/workspaces/${ws}/projects/${cfg.projectId}/issues/${id}/`,
+  ];
+}
+
+async function removeWorkItem(cfg, item, cancelledStateId) {
+  const id = item?.id;
+  if (!id) return true;
+  const paths = workItemPaths(cfg, id);
+
+  for (const path of paths) {
+    const probe = await tryPlane(cfg, { path });
+    if (probe.gone) return true;
+  }
+
+  for (const path of paths) {
+    const del = await tryPlane(cfg, { method: "DELETE", path });
+    if (del.ok) return true;
+  }
+
+  if (cancelledStateId) {
+    for (const path of paths) {
+      const patch = await tryPlane(cfg, { method: "PATCH", path, body: { state: cancelledStateId } });
+      if (patch.gone) return true;
+      if (patch.ok) {
+        await tryPlane(cfg, { method: "POST", path: `${path}archive/` });
+        return true;
+      }
+    }
+  }
+
+  for (const path of paths) {
+    const archived = await tryPlane(cfg, { method: "POST", path: `${path}archive/` });
+    if (archived.ok || archived.gone) return true;
+  }
+
+  for (const path of paths) {
+    const patch = await tryPlane(cfg, {
       method: "PATCH",
-      path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/${id}/`,
+      path,
       body: { archived_at: new Date().toISOString() },
     });
-    return true;
-  } catch (e) {
-    return false;
+    if (patch.ok || patch.gone) return true;
   }
+
+  const again = await tryPlane(cfg, { path: paths[0] });
+  if (again.gone) return true;
+  if (again.ok && again.data?.archived_at) return true;
+  return false;
 }
 
 export function normTitle(value) {
@@ -575,27 +625,25 @@ async function cleanupPlaneExtras(cfg, { keepIds, keepPlaneIds, keepTitles, dele
     const title = normTitle(row.title);
     if (title) delTitles.add(title);
   });
-  const cancelled = (states || []).find((s) => s.group === "cancelled");
+  const cancelled = await ensureCancelledState(cfg, states || []);
   let removed = 0;
   const errors = [];
   const alreadyRemoved = new Set();
-
-  for (const planeId of delPlane) {
-    if (keepPlane.has(planeId)) continue;
-    const ok = await removeWorkItem(cfg, { id: planeId }, cancelled?.id);
-    if (ok) {
-      removed += 1;
-      alreadyRemoved.add(planeId);
-    } else {
-      errors.push(`No se pudo quitar en Plane el ítem ya borrado (${planeId.slice(0, 8)}…)`);
-    }
-    await sleep(180);
-  }
 
   const remote = [];
   for (const item of await listAllWorkItems(cfg)) {
     remote.push(await hydrateWorkItem(cfg, item));
     await sleep(40);
+  }
+  const remoteIds = new Set(remote.map((item) => String(item.id)));
+  const listLooksEmpty = remote.length === 0;
+
+  for (const planeId of delPlane) {
+    if (keepPlane.has(planeId) || alreadyRemoved.has(planeId)) continue;
+    if (!listLooksEmpty && !remoteIds.has(planeId)) {
+      removed += 1;
+      alreadyRemoved.add(planeId);
+    }
   }
 
   const drop = [];
@@ -615,13 +663,33 @@ async function cleanupPlaneExtras(cfg, { keepIds, keepPlaneIds, keepTitles, dele
     if (parent && dropIds.has(parent)) markDrop(item);
   }
 
-  drop.sort((a, b) => (parentIdOf(a) ? 0 : 1) - (parentIdOf(b) ? 0 : 1));
-  for (const item of drop) {
-    if (alreadyRemoved.has(item.id)) continue;
-    const ok = await removeWorkItem(cfg, item, cancelled?.id);
-    if (ok) removed += 1;
-    else errors.push(`No se pudo quitar: ${item.name || item.id}`);
-    await sleep(180);
+  for (const planeId of delPlane) {
+    if (keepPlane.has(planeId) || alreadyRemoved.has(planeId) || dropIds.has(planeId)) continue;
+    const found = remote.find((item) => String(item.id) === planeId);
+    markDrop(found || { id: planeId, name: records.find((row) => String(row.planeWorkItemId) === planeId)?.title || "" });
+  }
+
+  const remaining = new Map(drop.map((item) => [item.id, item]));
+  let guard = 0;
+  while (remaining.size && guard < 400) {
+    guard += 1;
+    const leaves = [...remaining.values()].filter((item) => {
+      const parent = parentIdOf(item);
+      return !parent || !remaining.has(parent);
+    });
+    const batch = leaves.length ? leaves : [[...remaining.values()][0]];
+    for (const item of batch) {
+      remaining.delete(item.id);
+      const ok = await removeWorkItem(cfg, item, cancelled?.id);
+      if (ok) {
+        removed += 1;
+        alreadyRemoved.add(item.id);
+      } else {
+        const label = item.name || item.title || records.find((row) => String(row.planeWorkItemId) === String(item.id))?.title;
+        errors.push(`No se pudo quitar en Plane: ${label || "ítem de la papelera"}`);
+      }
+      await sleep(180);
+    }
   }
   return { removed, scanned: remote.length, errors };
 }

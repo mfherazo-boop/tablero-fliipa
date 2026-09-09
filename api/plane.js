@@ -75,6 +75,10 @@ export default async function handler(req, res) {
       },
       body: incoming.body ? JSON.stringify(incoming.body) : undefined,
     });
+    if (proxied.status === 204 || proxied.status === 205) {
+      json(res, 200, { ok: true });
+      return;
+    }
     const text = await proxied.text();
     res.statusCode = proxied.status;
     res.setHeader("Content-Type", "application/json; charset=utf-8");

@@ -175,9 +175,11 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, deletedItems,
       setMessage(
         result.failed
           ? "La migración terminó con algunos errores. Puedes volver a intentarlo: lo ya enviado se actualiza, no se duplica."
-          : result.removed
-            ? `Listo. Se quitaron ${result.removed} ítems en Plane (los que ya no están en Fliipa). Recarga Plane con F5.`
-            : "Listo. Lo de Fliipa quedó actualizado en Plane. Si borraste algo y aún lo ves, recarga Plane con F5."
+          : result.errors?.length
+            ? "Se actualizó Plane, pero algunos ítems de la papelera no se pudieron quitar. Vuelve a pulsar Migrar / actualizar."
+            : result.removed
+              ? `Listo. Se quitaron ${result.removed} ítems en Plane (los que ya no están en Fliipa). Recarga Plane con F5.`
+              : "Listo. Lo de Fliipa quedó actualizado en Plane. Recarga Plane con F5 para verlo."
       );
     } catch (e) {
       setStatus("error");

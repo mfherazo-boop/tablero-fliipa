@@ -12,6 +12,8 @@ import {
   isPlaneOnboarding,
   normTitle,
   planeItemShouldBeRemoved,
+  isPlaneGoneError,
+  isRetryableProxyError,
   DEFAULT_PLANE_BASE,
 } from "../src/plane.js";
 
@@ -85,6 +87,10 @@ assert(
   "no quitar título que sigue vivo",
   !planeItemShouldBeRemoved({ id: "x2", name: "Viva" }, { ...ctx, keepPlane: new Set() })
 );
+assert("404 de Plane cuenta como ya quitado", isPlaneGoneError({ status: 404, message: "Not found" }));
+assert("error de red sí se reintenta", isRetryableProxyError({ name: "TypeError", message: "Failed to fetch" }));
+assert("404 de Plane no se disfraza de CORS", !isRetryableProxyError({ status: 404, message: "Not found" }));
+assert("403 de Plane no se reintenta en otro proxy", !isRetryableProxyError({ status: 403, message: "Forbidden" }));
 
 const csv = buildPlaneCsv({
   initiatives: [{ title: "Lanzamiento, fase 1", status: "in_progress", dueDate: "2026-09-20", notes: "hola" }],
