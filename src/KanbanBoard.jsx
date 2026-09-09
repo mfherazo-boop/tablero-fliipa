@@ -3874,13 +3874,21 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
   const [saving, setSaving] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   const [type, setType] = useState("Task");
-  const [assignee, setAssignee] = useState(assignees[0] || "__none__");
+  const [assignee, setAssignee] = useState("__none__");
   const [customAssignee, setCustomAssignee] = useState("");
   const [status, setStatus] = useState("backlog");
   const [dueDate, setDueDate] = useState("");
   const [blocked, setBlocked] = useState(false);
   const fileInputRef = useRef(null);
   const useCustom = assignee === "__custom__";
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape" && !saving) onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, saving]);
 
   async function addFiles(fileList) {
     const files = Array.from(fileList || []);
@@ -3931,28 +3939,84 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
     }
   }
 
-  const label = labelStyle(C);
+  const label = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: C.textFaint,
+    marginTop: 16,
+    marginBottom: 7,
+  };
   const input = inputStyle(C);
-  const ghost = ghostBtn(C);
   const primary = primaryBtn(C);
+  const canSave = Boolean(title.trim()) && !saving;
 
   return (
     <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(8,10,14,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }}
+      onClick={() => {
+        if (!saving) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(8,10,14,0.45)",
+        display: "flex",
+        justifyContent: "flex-end",
+        zIndex: 50,
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="fliipa-modal-pad"
-        style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 440, padding: 20, maxHeight: "90vh", overflowY: "auto" }}
+        role="dialog"
+        aria-label="Nueva tarea"
+        className="fliipa-drawer"
+        style={{
+          width: "min(400px, 100%)",
+          height: "100%",
+          background: C.surface,
+          borderLeft: `1px solid ${C.border}`,
+          boxShadow: "-12px 0 40px rgba(0,0,0,0.28)",
+          overflowY: "auto",
+          padding: "22px 24px 28px",
+          animation: "fliipaDrawerIn 180ms ease-out",
+        }}
       >
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 6 }}>Nueva tarea</div>
-        <div style={{ fontSize: 12.5, color: C.textMuted, lineHeight: 1.45, marginBottom: 14 }}>
-          Un trabajo concreto. Si la vinculas a una iniciativa, el % de avance de esa iniciativa sube al moverla.
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 700 }}>Nueva tarea</div>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            aria-label="Cerrar"
+            style={{
+              background: "none",
+              border: "none",
+              color: C.textFaint,
+              cursor: saving ? "not-allowed" : "pointer",
+              fontSize: 20,
+              lineHeight: 1,
+              padding: 4,
+            }}
+          >
+            ✕
+          </button>
         </div>
 
-        <label style={label}>Título</label>
-        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="¿Qué hay que hacer?" style={input} />
+        <label style={{ ...label, marginTop: 10 }}>Título</label>
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleSave();
+            }
+          }}
+          placeholder="Qué hay que hacer"
+          style={input}
+        />
 
         <label style={label}>Iniciativa</label>
         <select value={initiativeId} onChange={(e) => setInitiativeId(e.target.value)} style={input}>
@@ -3964,7 +4028,42 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
           ))}
         </select>
 
-        <label style={label}>Descripción</label>
+        <label style={label}>Etiqueta (opcional)</label>
+        <select value={type} onChange={(e) => setType(e.target.value)} style={input}>
+          {Object.entries(TASK_TYPES).map(([key, val]) => (
+            <option key={key} value={key}>
+              {val.label}
+            </option>
+          ))}
+        </select>
+
+        <label style={label}>Estado</label>
+        <select value={status} onChange={(e) => setStatus(e.target.value)} style={input}>
+          {COLUMNS.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+
+        <label style={label}>Responsable</label>
+        <select value={assignee} onChange={(e) => setAssignee(e.target.value)} style={input}>
+          <option value="__none__">Sin asignar</option>
+          {assignees.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+          <option value="__custom__">Otro…</option>
+        </select>
+        {useCustom && (
+          <input value={customAssignee} onChange={(e) => setCustomAssignee(e.target.value)} placeholder="Nombre del responsable" style={{ ...input, marginTop: 8 }} />
+        )}
+
+        <label style={label}>Fecha de vencimiento</label>
+        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} placeholder="dd / mm / aaaa" style={input} />
+
+        <label style={label}>Notas (opcional)</label>
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -3987,7 +4086,7 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
-            placeholder="Detalles, contexto o criterios de la tarea (opcional). Arrastra aquí imágenes o documentos."
+            placeholder="Detalles o contexto. Arrastra aquí imágenes o documentos."
             style={{ ...input, resize: "vertical", minHeight: 88, margin: 0, border: "none", background: "transparent" }}
           />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: "0 2px 2px" }}>
@@ -4058,54 +4157,24 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
         </div>
         {attachError && <div style={{ fontSize: 12.5, color: C.danger, marginTop: 8 }}>{attachError}</div>}
 
-        <label style={label}>Tipo</label>
-        <select value={type} onChange={(e) => setType(e.target.value)} style={input}>
-          {Object.entries(TASK_TYPES).map(([key, val]) => (
-            <option key={key} value={key}>
-              {val.label}
-            </option>
-          ))}
-        </select>
-
-        <label style={label}>Responsable</label>
-        <select value={assignee} onChange={(e) => setAssignee(e.target.value)} style={input}>
-          <option value="__none__">Sin asignar</option>
-          {assignees.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-          <option value="__custom__">Otro…</option>
-        </select>
-        {useCustom && (
-          <input value={customAssignee} onChange={(e) => setCustomAssignee(e.target.value)} placeholder="Nombre del responsable" style={{ ...input, marginTop: 8 }} />
-        )}
-
-        <label style={label}>Columna inicial</label>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={input}>
-          {COLUMNS.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-
-        <label style={label}>Fecha límite (opcional)</label>
-        <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={input} />
-
-        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13, color: C.textMuted, cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, fontSize: 13, color: C.textMuted, cursor: "pointer" }}>
           <input type="checkbox" checked={blocked} onChange={(e) => setBlocked(e.target.checked)} />
           Marcar como bloqueada
         </label>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-          <button onClick={onClose} style={ghost} disabled={saving}>
-            Cancelar
-          </button>
-          <button onClick={handleSave} style={{ ...primary, opacity: saving ? 0.7 : 1 }} disabled={saving}>
-            {saving ? "Subiendo…" : "Crear tarea"}
-          </button>
-        </div>
+        <button
+          onClick={handleSave}
+          style={{
+            ...primary,
+            marginTop: 22,
+            padding: "10px 18px",
+            opacity: canSave ? 1 : 0.55,
+            cursor: canSave ? "pointer" : "not-allowed",
+          }}
+          disabled={!canSave}
+        >
+          {saving ? "Subiendo…" : "Crear tarea"}
+        </button>
       </div>
     </div>
   );
