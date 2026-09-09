@@ -1577,6 +1577,7 @@ export default function KanbanBoard() {
           C={C}
           tasks={tasks}
           initiatives={initiatives}
+          deletedIds={[...Object.keys(deletedTaskIds), ...Object.keys(deletedInitIds)]}
           onClose={() => setPlaneOpen(false)}
           onItemMigrated={markPlaneItem}
           onBackup={() => {

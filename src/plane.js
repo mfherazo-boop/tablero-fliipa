@@ -398,6 +398,88 @@ function buildInitiativeHtml(initiative) {
   return lines.join("");
 }
 
+async function listAllWorkItems(cfg) {
+  const all = [];
+  const seen = new Set();
+  let cursor = "";
+  for (let page = 1; page <= 30; page++) {
+    const qs = `per_page=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const data = await planeRequest({
+      ...cfg,
+      path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/?${qs}`,
+    });
+    const batch = resultsOf(data);
+    for (const item of batch) {
+      if (item?.id && !seen.has(item.id)) {
+        seen.add(item.id);
+        all.push(item);
+      }
+    }
+    let next = data?.next_cursor || "";
+    if (!next && typeof data?.next === "string" && data.next.includes("cursor=")) {
+      try {
+        next = new URL(data.next, "https://api.plane.so").searchParams.get("cursor") || "";
+      } catch (e) {
+        next = "";
+      }
+    }
+    if (!next || batch.length === 0) break;
+    cursor = next;
+  }
+  return all;
+}
+
+function isFliipaItem(item) {
+  return String(item?.external_source || "") === PLANE_SOURCE;
+}
+
+function isPlaneOnboarding(item) {
+  const name = String(item?.name || item?.title || "");
+  return /create projects|create and assign work items|visualize your work|invite (your )?team|getting started/i.test(name);
+}
+
+async function removeWorkItem(cfg, id) {
+  try {
+    await planeRequest({
+      ...cfg,
+      method: "DELETE",
+      path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/${id}/`,
+    });
+    return true;
+  } catch (e) {
+    if (e.status === 404) return true;
+    try {
+      await planeRequest({
+        ...cfg,
+        method: "POST",
+        path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/${id}/archive/`,
+      });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+}
+
+async function cleanupPlaneExtras(cfg, { keepIds, deletedIds }) {
+  const keep = new Set([...(keepIds || [])].map(String));
+  const deleted = new Set([...(deletedIds || [])].map(String));
+  const remote = await listAllWorkItems(cfg);
+  let removed = 0;
+  for (const item of remote) {
+    const ext = item.external_id == null || item.external_id === "" ? "" : String(item.external_id);
+    const drop =
+      (ext && deleted.has(ext)) ||
+      (isFliipaItem(item) && ext && !keep.has(ext)) ||
+      (!isFliipaItem(item) && isPlaneOnboarding(item));
+    if (!drop) continue;
+    const ok = await removeWorkItem(cfg, item.id);
+    if (ok) removed += 1;
+    await sleep(150);
+  }
+  return removed;
+}
+
 async function findExisting(cfg, externalId) {
   try {
     const found = resultsOf(
@@ -518,10 +600,15 @@ export async function migrateToPlane({
   projectId,
   tasks,
   initiatives,
+  deletedIds,
   onProgress,
   onItemMigrated,
 }) {
   const cfg = { baseUrl, apiKey, workspace: parseWorkspaceInput(workspace), projectId };
+  const dropped = new Set([...(deletedIds || [])].map(String));
+  const liveTasks = (tasks || []).filter((t) => t && !dropped.has(String(t.id)));
+  const liveInits = (initiatives || []).filter((i) => i && !dropped.has(String(i.id)));
+  const keepIds = [...liveTasks.map((t) => t.id), ...liveInits.map((i) => i.id)];
   const states = await listStates(cfg);
   const labels = await listLabels(cfg);
   let members = [];
@@ -541,6 +628,13 @@ export async function migrateToPlane({
     await alignPlaneLabels(cfg, labels);
   } catch (e) {
     /* ignore */
+  }
+  const summary = { created: 0, updated: 0, failed: 0, removed: 0, errors: [] };
+  try {
+    if (onProgress) onProgress({ current: 0, total: 1, label: "Quitando ejemplos y ítems borrados" });
+    summary.removed = await cleanupPlaneExtras(cfg, { keepIds, deletedIds: dropped });
+  } catch (e) {
+    summary.errors.push(`Limpieza: ${e.message}`);
   }
   const stateMap = {
     backlog: matchState(states, "backlog"),
@@ -564,15 +658,14 @@ export async function migrateToPlane({
   }
 
   const items = [
-    ...(initiatives || []).map((initiative) => ({ kind: "initiative", item: initiative })),
-    ...(tasks || []).map((task) => ({ kind: "task", item: task })),
+    ...liveInits.map((initiative) => ({ kind: "initiative", item: initiative })),
+    ...liveTasks.map((task) => ({ kind: "task", item: task })),
   ];
-  const summary = { created: 0, updated: 0, failed: 0, errors: [] };
   const planeIds = {};
-  (initiatives || []).forEach((ini) => {
+  liveInits.forEach((ini) => {
     if (ini.planeWorkItemId) planeIds[ini.id] = ini.planeWorkItemId;
   });
-  (tasks || []).forEach((task) => {
+  liveTasks.forEach((task) => {
     if (task.planeWorkItemId) planeIds[task.id] = task.planeWorkItemId;
   });
 
@@ -587,7 +680,7 @@ export async function migrateToPlane({
       let payload;
       if (kind === "task") {
         const member = matchMember(members, item.assignee);
-        const initiative = (initiatives || []).find((ini) => sameId(ini.id, item.initiativeId));
+        const initiative = liveInits.find((ini) => sameId(ini.id, item.initiativeId));
         const parentId = item.initiativeId ? planeIds[item.initiativeId] || initiative?.planeWorkItemId : null;
         payload = {
           name: item.title || "Sin título",

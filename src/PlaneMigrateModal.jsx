@@ -50,7 +50,7 @@ function isBrowserBlocked(error) {
   );
 }
 
-export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onItemMigrated, onBackup }) {
+export default function PlaneMigrateModal({ C, tasks, initiatives, deletedIds, onClose, onItemMigrated, onBackup }) {
   const saved = useMemo(loadSettings, []);
   const [baseUrl, setBaseUrl] = useState(saved.baseUrl || DEFAULT_PLANE_BASE);
   const [apiKey, setApiKey] = useState("");
@@ -165,6 +165,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
         projectId,
         tasks,
         initiatives,
+        deletedIds,
         onProgress: setProgress,
         onItemMigrated,
       });
@@ -174,7 +175,9 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
       setMessage(
         result.failed
           ? "La migración terminó con algunos errores. Puedes volver a intentarlo: lo ya enviado se actualiza, no se duplica."
-          : "Listo. El tablero de Fliipa sigue igual; ahora también está en Plane."
+          : result.removed
+            ? `Listo. Se quitaron ${result.removed} ítems de ejemplo o ya borrados. En Plane recarga la página.`
+            : "Listo. El tablero de Fliipa sigue igual; ahora también está en Plane. Recarga Plane si aún ves ejemplos viejos."
       );
     } catch (e) {
       setStatus("error");
@@ -258,7 +261,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
             </li>
           </ol>
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.borderSoft}`, fontSize: 12.5 }}>
-            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> arriba a la derecha cambia de Lista al icono de <strong style={{ color: C.text }}>tablero</strong> (columnas). Al migrar, las columnas quedan en español: Pendiente, Por hacer, En progreso, En revisión, Hecho. Los menús de Plane (Work items, Add work item) se cambian en tu cuenta: avatar → Settings → Preferences → Language → Español. Este Kanban no se borra; lo eliminado se guarda en Papelera.
+            <strong style={{ color: C.text, fontWeight: 600 }}>Cómo se ve en Plane:</strong> usa la vista tablero (columnas). Al migrar se quitan los ejemplos de Plane (“Create Projects”, etc.) y lo que ya borraste en Fliipa queda en la Papelera, no vuelve a Plane. Los menús de Plane se traducen en avatar → Settings → Preferences → Language → Español.
           </div>
         </div>
 
@@ -352,7 +355,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, onClose, onIt
 
         {summary && (
           <div style={{ fontSize: 13, color: C.textMuted, marginTop: 10, lineHeight: 1.5 }}>
-            Creadas: {summary.created} · Actualizadas: {summary.updated} · Fallidas: {summary.failed}
+            Creadas: {summary.created} · Actualizadas: {summary.updated} · Quitadas: {summary.removed || 0} · Fallidas: {summary.failed}
             {summary.errors.length > 0 && (
               <div style={{ marginTop: 8, color: C.danger, fontSize: 12.5 }}>
                 {summary.errors.slice(0, 5).map((err) => (
