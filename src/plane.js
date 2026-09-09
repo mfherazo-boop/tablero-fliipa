@@ -124,6 +124,7 @@ async function parsePlaneResponse(res) {
     err.data = data;
     throw err;
   }
+  if (res.status === 204 || res.status === 205) return data || {};
   return data;
 }
 
@@ -398,7 +399,7 @@ function buildInitiativeHtml(initiative) {
   return lines.join("");
 }
 
-function flattenWorkItems(data) {
+export function flattenWorkItems(data) {
   if (!data) return [];
   if (Array.isArray(data)) return data.filter((item) => item && item.id);
   const results = data.results;
@@ -448,7 +449,7 @@ function isFliipaItem(item) {
   return String(item?.external_source || "") === PLANE_SOURCE;
 }
 
-function isPlaneOnboarding(item) {
+export function isPlaneOnboarding(item) {
   const name = String(item?.name || item?.title || "").replace(/\s+/g, " ").trim();
   return (
     /create projects/i.test(name) ||
@@ -509,7 +510,7 @@ async function removeWorkItem(cfg, item, cancelledStateId) {
   }
 }
 
-function normTitle(value) {
+export function normTitle(value) {
   return String(value || "")
     .replace(/^\[iniciativa\]\s*/i, "")
     .replace(/\s+/g, " ")
@@ -539,6 +540,27 @@ async function hydrateWorkItem(cfg, item) {
     }
   }
   return item;
+}
+
+export function planeItemShouldBeRemoved(item, ctx) {
+  if (!item?.id) return false;
+  const keepPlane = ctx.keepPlane || new Set();
+  const delPlane = ctx.delPlane || new Set();
+  const delExt = ctx.delExt || new Set();
+  const keepExt = ctx.keepExt || new Set();
+  const liveTitles = ctx.liveTitles || new Set();
+  const delTitles = ctx.delTitles || new Set();
+  if (keepPlane.has(item.id) || keepPlane.has(String(item.id))) return false;
+  const ext = item.external_id == null || item.external_id === "" ? "" : String(item.external_id);
+  const title = normTitle(item.name || item.title);
+  return (
+    delPlane.has(item.id) ||
+    delPlane.has(String(item.id)) ||
+    (ext && (delExt.has(ext) || delExt.has(String(ext)))) ||
+    (isFliipaItem(item) && ext && !keepExt.has(ext)) ||
+    (title && delTitles.has(title) && !liveTitles.has(title)) ||
+    isPlaneOnboarding(item)
+  );
 }
 
 async function cleanupPlaneExtras(cfg, { keepIds, keepPlaneIds, keepTitles, deletedItems, states }) {
@@ -584,16 +606,9 @@ async function cleanupPlaneExtras(cfg, { keepIds, keepPlaneIds, keepTitles, dele
     drop.push(item);
   }
 
+  const ctx = { keepPlane, delPlane, delExt, keepExt, liveTitles, delTitles };
   for (const item of remote) {
-    const ext = item.external_id == null || item.external_id === "" ? "" : String(item.external_id);
-    const title = normTitle(item.name || item.title);
-    const gone =
-      delPlane.has(item.id) ||
-      (ext && delExt.has(ext)) ||
-      (isFliipaItem(item) && ext && !keepExt.has(ext)) ||
-      (title && delTitles.has(title) && !liveTitles.has(title)) ||
-      isPlaneOnboarding(item);
-    if (gone) markDrop(item);
+    if (planeItemShouldBeRemoved(item, ctx)) markDrop(item);
   }
   for (const item of remote) {
     const parent = parentIdOf(item);
@@ -613,12 +628,11 @@ async function cleanupPlaneExtras(cfg, { keepIds, keepPlaneIds, keepTitles, dele
 
 async function findExisting(cfg, externalId) {
   try {
-    const found = resultsOf(
-      await planeRequest({
-        ...cfg,
-        path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/?per_page=5&external_id=${encodeURIComponent(externalId)}&external_source=${encodeURIComponent(PLANE_SOURCE)}`,
-      })
-    );
+    const data = await planeRequest({
+      ...cfg,
+      path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/work-items/?per_page=5&external_id=${encodeURIComponent(externalId)}&external_source=${encodeURIComponent(PLANE_SOURCE)}`,
+    });
+    const found = flattenWorkItems(data);
     return found[0] || null;
   } catch (e) {
     return null;
