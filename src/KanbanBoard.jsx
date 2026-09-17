@@ -71,6 +71,24 @@ function initiativeColor(ini, index = 0) {
   return AVATAR_COLORS[n % AVATAR_COLORS.length];
 }
 
+function isLastMonthExport(task) {
+  if (!task) return false;
+  if (task.source === "legacy-csv" || task.sourceId) return true;
+  return String(task.id || "").startsWith("legacy-");
+}
+
+function monthExportLabel(tasks) {
+  const counts = {};
+  (tasks || []).forEach((t) => {
+    const ts = t.updatedAt || t.statusChangedAt;
+    if (!ts) return;
+    const key = new Date(ts).toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0] : "último mes";
+}
+
 function idsMatch(a, b) {
   if (a == null || b == null || a === "" || b === "") return false;
   return String(a) === String(b);
@@ -518,6 +536,7 @@ export default function KanbanBoard() {
   const [nameQuery, setNameQuery] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [unassignedOnly, setUnassignedOnly] = useState(false);
+  const [lastMonthOnly, setLastMonthOnly] = useState(true);
   const [initiativeFilter, setInitiativeFilter] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -862,15 +881,18 @@ export default function KanbanBoard() {
     setTasks((prev) => [...prev]);
   }
 
+  const monthExportTasks = useMemo(() => tasks.filter(isLastMonthExport), [tasks]);
+  const boardPool = lastMonthOnly ? monthExportTasks : tasks;
+
   const assignees = useMemo(() => {
-    const set = new Set([...ROSTER, ...tasks.map((t) => t.assignee).filter(Boolean)]);
+    const set = new Set([...ROSTER, ...boardPool.map((t) => t.assignee).filter(Boolean)]);
     return ["Todos", ...Array.from(set).sort()];
-  }, [tasks]);
+  }, [boardPool]);
 
   const scopedTasks = useMemo(() => {
-    if (!initiativeFilter) return tasks;
-    return tasks.filter((t) => idsMatch(t.initiativeId, initiativeFilter));
-  }, [tasks, initiativeFilter]);
+    if (!initiativeFilter) return boardPool;
+    return boardPool.filter((t) => idsMatch(t.initiativeId, initiativeFilter));
+  }, [boardPool, initiativeFilter]);
 
   const filtered = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -933,6 +955,23 @@ export default function KanbanBoard() {
       };
     });
   }, [initiatives, tasks]);
+
+  const boardInitiativeStats = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return initiatives.map((ini, index) => {
+      const related = boardPool.filter((t) => idsMatch(t.initiativeId, ini.id));
+      const done = related.filter((t) => t.status === "done").length;
+      return {
+        ...ini,
+        color: initiativeColor(ini, index),
+        taskCount: related.length,
+        vencidas: related.filter((t) => t.dueDate && t.dueDate < today && t.status !== "done").length,
+        sinAsignar: related.filter((t) => !t.assignee).length,
+        closed: done,
+        progress: weightedInitiativeProgress(related, ini.progress),
+      };
+    });
+  }, [initiatives, boardPool]);
 
   function moveTask(id, status) {
     const now = Date.now();
@@ -1056,8 +1095,23 @@ export default function KanbanBoard() {
   const stats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const sevenDays = 7 * 86400000;
-    const active = scopedTasks.filter((t) => t.status !== "done");
+    const list = scopedTasks;
+    const active = list.filter((t) => t.status !== "done");
+    if (lastMonthOnly) {
+      return {
+        mode: "month",
+        total: list.length,
+        enCurso: active.length,
+        cerradas: list.filter((t) => t.status === "done").length,
+        bloqueadas: list.filter((t) => t.blocked).length,
+        sinAsignar: list.filter((t) => !t.assignee).length,
+        review: list.filter((t) => t.status === "review").length,
+        inProgress: list.filter((t) => t.status === "in_progress").length,
+        backlog: list.filter((t) => t.status === "backlog").length,
+      };
+    }
     return {
+      mode: "board",
       total: active.length,
       vencidas: active.filter((t) => t.dueDate && t.dueDate < today).length,
       sinAsignar: active.filter((t) => !t.assignee).length,
@@ -1066,7 +1120,7 @@ export default function KanbanBoard() {
         (t) => t.statusChangedAt && Date.now() - t.statusChangedAt <= sevenDays
       ).length,
     };
-  }, [scopedTasks]);
+  }, [scopedTasks, lastMonthOnly]);
   const doneTasks = useMemo(
     () => filtered.filter((t) => t.status === "done"),
     [filtered]
@@ -1285,7 +1339,7 @@ export default function KanbanBoard() {
         ) : activeTab === "hecho" ? (
           <DoneArchiveView
             C={C}
-            tasks={tasks}
+            tasks={lastMonthOnly ? monthExportTasks : tasks}
             initiatives={initiatives}
             onOpen={(id) => setOpenTaskId(id)}
             onReopen={(id) => updateTask(id, { status: "review" })}
@@ -1314,28 +1368,71 @@ export default function KanbanBoard() {
           <>
             {/* Métricas */}
             <div className="fliipa-stats">
-              <StatCard
-                C={C}
-                label={
-                  selectedInitiative
-                    ? `Tareas · ${selectedInitiative.title}`
-                    : "Tareas"
-                }
-                value={stats.total}
-                caption={selectedInitiative ? "en curso" : "en el tablero"}
-                color={C.accent}
-              />
-              <StatCard C={C} label="Vencidas" value={stats.vencidas} caption="en total" color={stats.vencidas ? C.danger : C.text} />
-              <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="en total" color={C.text} />
-              <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="en total" color={C.text} />
-              <StatCard
-                C={C}
-                label="Cambio de estado · 7 días"
-                value={stats.cambioEstado}
-                caption="en total"
-                color={C.accent}
-              />
+              {stats.mode === "month" ? (
+                <>
+                  <StatCard
+                    C={C}
+                    label={
+                      selectedInitiative
+                        ? `Tareas · ${selectedInitiative.title}`
+                        : "Tareas · último mes"
+                    }
+                    value={stats.total}
+                    caption={selectedInitiative ? "del export" : `export ${monthExportLabel(monthExportTasks)}`}
+                    color={C.accent}
+                  />
+                  <StatCard C={C} label="En curso" value={stats.enCurso} caption="en el tablero" color={C.text} />
+                  <button
+                    onClick={() => setActiveTab("hecho")}
+                    style={{
+                      flex: "1 1 160px",
+                      minWidth: 140,
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      textAlign: "left",
+                      cursor: "pointer",
+                      color: "inherit",
+                      font: "inherit",
+                    }}
+                  >
+                    <StatCard C={C} label="Cerradas" value={stats.cerradas} caption="en Hecho" color={C.accent} />
+                  </button>
+                  <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="del export" color={C.text} />
+                  <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="del export" color={C.text} />
+                </>
+              ) : (
+                <>
+                  <StatCard
+                    C={C}
+                    label={
+                      selectedInitiative
+                        ? `Tareas · ${selectedInitiative.title}`
+                        : "Tareas"
+                    }
+                    value={stats.total}
+                    caption={selectedInitiative ? "en curso" : "en el tablero"}
+                    color={C.accent}
+                  />
+                  <StatCard C={C} label="Vencidas" value={stats.vencidas} caption="en total" color={stats.vencidas ? C.danger : C.text} />
+                  <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="en total" color={C.text} />
+                  <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="en total" color={C.text} />
+                  <StatCard
+                    C={C}
+                    label="Cambio de estado · 7 días"
+                    value={stats.cambioEstado}
+                    caption="en total"
+                    color={C.accent}
+                  />
+                </>
+              )}
             </div>
+            {stats.mode === "month" && !selectedInitiative && (
+              <div style={{ fontSize: 13, color: C.textMuted, marginTop: -12, marginBottom: 18, lineHeight: 1.45 }}>
+                Pendiente {stats.backlog} · En progreso {stats.inProgress} · En revisión {stats.review} · Hecho {stats.cerradas}.
+                Las cerradas están en la pestaña Hecho; aquí queda el trabajo que sigue abierto.
+              </div>
+            )}
 
             <div
               className="fliipa-filter-card"
@@ -1373,14 +1470,19 @@ export default function KanbanBoard() {
                   <FilterChip
                     C={C}
                     active={!initiativeFilter}
-                    label={`Todas ${tasks.filter((t) => t.status !== "done").length}`}
+                    label={`Todas ${lastMonthOnly ? boardPool.length : boardPool.filter((t) => t.status !== "done").length}`}
                     onClick={() => setInitiativeFilter(null)}
                   />
-                  {initiativeStats
+                  {boardInitiativeStats
                     .filter((ini) => {
                       const activeN = Math.max(0, (ini.taskCount || 0) - (ini.closed || 0));
                       const selected = idsMatch(initiativeFilter, ini.id);
-                      if (!nameQuery.trim()) return selected || activeN > 0;
+                      if (lastMonthOnly) {
+                        if (!ini.taskCount && !selected) return false;
+                        if (!nameQuery.trim()) return true;
+                      } else if (!nameQuery.trim()) {
+                        return selected || activeN > 0;
+                      }
                       if (textMatches(nameQuery, ini.title, ini.owner)) return true;
                       return filtered.some((t) => idsMatch(t.initiativeId, ini.id));
                     })
@@ -1389,7 +1491,7 @@ export default function KanbanBoard() {
                       key={ini.id}
                       C={C}
                       active={idsMatch(initiativeFilter, ini.id)}
-                      label={`${ini.title} ${Math.max(0, (ini.taskCount || 0) - (ini.closed || 0))}`}
+                      label={`${ini.title} ${lastMonthOnly ? ini.taskCount : Math.max(0, (ini.taskCount || 0) - (ini.closed || 0))}`}
                       dotColor={ini.color}
                       onClick={() => setInitiativeFilter(idsMatch(initiativeFilter, ini.id) ? null : ini.id)}
                     />
@@ -1445,6 +1547,7 @@ export default function KanbanBoard() {
                       </option>
                     ))}
                   </select>
+                  <FilterChip C={C} active={lastMonthOnly} label="Último mes" onClick={() => setLastMonthOnly((v) => !v)} />
                   <FilterChip C={C} active={overdueOnly} label="Solo vencidas" onClick={() => setOverdueOnly((v) => !v)} />
                   <FilterChip C={C} active={unassignedOnly} label="Solo sin asignar" onClick={() => setUnassignedOnly((v) => !v)} />
                   <button
