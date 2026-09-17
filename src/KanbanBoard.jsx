@@ -95,9 +95,7 @@ function isOverdueTask(task) {
 function isLastMonthExport(task) {
   if (!task) return false;
   const ts = task.updatedAt || task.statusChangedAt || task.createdAt;
-  if (!isInLastMonth(ts)) return false;
-  if (task.source === "legacy-csv" || task.sourceId) return true;
-  return String(task.id || "").startsWith("legacy-");
+  return isInLastMonth(ts);
 }
 
 function monthExportLabel(tasks) {
