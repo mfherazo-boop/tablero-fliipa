@@ -95,7 +95,9 @@ function isOverdueTask(task) {
 function isLastMonthExport(task) {
   if (!task) return false;
   const ts = task.updatedAt || task.statusChangedAt || task.createdAt;
-  return isInLastMonth(ts);
+  if (!isInLastMonth(ts)) return false;
+  if (task.source === "legacy-csv" || task.sourceId) return true;
+  return String(task.id || "").startsWith("legacy-");
 }
 
 function monthExportLabel(tasks) {
@@ -557,7 +559,7 @@ export default function KanbanBoard() {
   const [nameQuery, setNameQuery] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [unassignedOnly, setUnassignedOnly] = useState(false);
-  const [lastMonthOnly, setLastMonthOnly] = useState(true);
+  const [lastMonthOnly, setLastMonthOnly] = useState(false);
   const [initiativeFilter, setInitiativeFilter] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
