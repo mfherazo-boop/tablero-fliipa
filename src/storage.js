@@ -6,8 +6,33 @@ const KV = "https://keyvalue.immanuel.co/api/KeyVal";
 
 let cache = {};
 let writeQueue = Promise.resolve();
-let mode = null; // "api" | "shared"
+let mode = null; // "api" | "shared" | "local"
 const fileCache = {};
+
+function shouldUseLocalFallback() {
+  if (typeof window === "undefined") return false;
+  const host = window.location && window.location.hostname ? window.location.hostname : "";
+  return /github\.io|localhost|127\.0\.0\.1|192\.168\.|10\.\d+\.\d+\.\d+/.test(host);
+}
+
+function readLocalSnapshot() {
+  try {
+    const raw = localStorage.getItem("fliipa-kanban:cache");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveLocalSnapshot(data) {
+  try {
+    localStorage.setItem("fliipa-kanban:cache", JSON.stringify(data || {}));
+  } catch (e) {
+    /* ignore quota */
+  }
+}
 
 function parsePointer(raw) {
   if (!raw) return null;
@@ -74,42 +99,53 @@ async function ensureMode() {
 
 async function fetchBoard() {
   await ensureMode();
-  if (mode === "api") {
-    const res = await fetch(API, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error("No se pudo leer el tablero compartido");
-    const data = await res.json();
-    cache = data && typeof data === "object" ? data : {};
-  } else {
-    const id = await readPointer();
-    cache = id ? await readBox(id) : {};
-  }
   try {
-    localStorage.setItem("fliipa-kanban:cache", JSON.stringify(cache));
+    if (mode === "api") {
+      const res = await fetch(API, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error("No se pudo leer el tablero compartido");
+      const data = await res.json();
+      cache = data && typeof data === "object" ? data : {};
+    } else {
+      const id = await readPointer();
+      cache = id ? await readBox(id) : {};
+    }
   } catch (e) {
-    /* ignore quota */
+    if (shouldUseLocalFallback()) {
+      cache = readLocalSnapshot();
+      mode = "local";
+      return cache;
+    }
+    throw e;
   }
+  saveLocalSnapshot(cache);
   return cache;
 }
 
 async function putBoard(data) {
   await ensureMode();
-  if (mode === "api") {
-    const res = await fetch(API, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error("No se pudo guardar el tablero compartido");
-  } else {
-    const id = await writeBox(data);
-    await writePointer(id);
+  try {
+    if (mode === "api") {
+      const res = await fetch(API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("No se pudo guardar el tablero compartido");
+    } else if (mode !== "local") {
+      const id = await writeBox(data);
+      await writePointer(id);
+    }
+  } catch (e) {
+    if (shouldUseLocalFallback()) {
+      mode = "local";
+      cache = data;
+      saveLocalSnapshot(data);
+      return true;
+    }
+    throw e;
   }
   cache = data;
-  try {
-    localStorage.setItem("fliipa-kanban:cache", JSON.stringify(cache));
-  } catch (e) {
-    /* ignore quota */
-  }
+  saveLocalSnapshot(cache);
   return true;
 }
 
@@ -177,11 +213,21 @@ export function installStorage() {
         try {
           all = await fetchBoard();
         } catch (e) {
-          all = { ...cache };
+          all = { ...readLocalSnapshot(), ...cache };
         }
         all[key] = value;
         all._updatedAt = Date.now();
-        return putBoard(all);
+        try {
+          return await putBoard(all);
+        } catch (e) {
+          if (shouldUseLocalFallback()) {
+            mode = "local";
+            cache = all;
+            saveLocalSnapshot(all);
+            return true;
+          }
+          throw e;
+        }
       });
       return writeQueue;
     },
