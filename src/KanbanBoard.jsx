@@ -71,8 +71,22 @@ function initiativeColor(ini, index = 0) {
   return AVATAR_COLORS[n % AVATAR_COLORS.length];
 }
 
+function lastMonthCutoff() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+}
+
+function isInLastMonth(ts) {
+  if (!ts) return false;
+  const time = Number(ts);
+  if (!Number.isFinite(time)) return false;
+  return time >= lastMonthCutoff();
+}
+
 function isLastMonthExport(task) {
   if (!task) return false;
+  const ts = task.updatedAt || task.statusChangedAt || task.createdAt;
+  if (!isInLastMonth(ts)) return false;
   if (task.source === "legacy-csv" || task.sourceId) return true;
   return String(task.id || "").startsWith("legacy-");
 }
