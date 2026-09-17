@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   DEFAULT_PLANE_BASE,
+  auditMigration,
   buildMigrationPackage,
   buildPlaneCsv,
   listProjects,
@@ -65,6 +66,7 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, deletedItems,
 
   const totalItems = (tasks || []).length + (initiatives || []).length;
   const already = (tasks || []).filter((t) => t.planeWorkItemId).length + (initiatives || []).filter((i) => i.planeWorkItemId).length;
+  const audit = useMemo(() => auditMigration({ tasks, initiatives, deletedItems }), [tasks, initiatives, deletedItems]);
   const label = (text) => ({ display: "block", fontSize: 12, color: C.textMuted, marginTop: 12, marginBottom: 5 });
   const input = {
     width: "100%",
@@ -231,6 +233,53 @@ export default function PlaneMigrateModal({ C, tasks, initiatives, deletedItems,
         <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 10 }}>
           Ahora mismo hay {tasks.length} tarea{tasks.length === 1 ? "" : "s"} y {initiatives.length} iniciativa{initiatives.length === 1 ? "" : "s"}
           {already ? ` · ${already} ya vinculadas a Plane` : ""}.
+        </div>
+
+        <div
+          style={{
+            background: C.surfaceRaised,
+            border: `1px solid ${C.borderSoft}`,
+            borderRadius: 10,
+            padding: "12px 14px",
+            marginBottom: 12,
+            fontSize: 13,
+            color: C.textMuted,
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textFaint, marginBottom: 8 }}>
+            Revisión antes de migrar
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            Los <strong style={{ color: C.text, fontWeight: 600 }}>títulos no tienen que ser iguales</strong> a los de Plane.
+            El vínculo es el ID interno de Fliipa: si una tarea ya se migró, se actualiza aunque le hayas cambiado el nombre.
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            Los responsables (Mafe, William…) no hace falta que sean idénticos, pero el nombre de Fliipa debe
+            reconocerse en el de Plane (por ejemplo <span style={{ color: C.text }}>Mafe</span> encaja con{" "}
+            <span style={{ color: C.text }}>Mafe Herazo</span>). Si no coincide, la tarea igual llega; queda sin asignar.
+          </div>
+          {audit.orphanInitiative.length > 0 ? (
+            <div style={{ marginBottom: 6, color: C.text }}>
+              {audit.orphanInitiative.length} tarea{audit.orphanInitiative.length === 1 ? "" : "s"} apunta
+              {audit.orphanInitiative.length === 1 ? "" : "n"} a una iniciativa que ya no está en el tablero.
+              Igual se migran, sueltas, no se pierden:{" "}
+              {audit.orphanInitiative
+                .slice(0, 3)
+                .map((t) => t.title || "Sin título")
+                .join(", ")}
+              {audit.orphanInitiative.length > 3 ? "…" : "."}
+            </div>
+          ) : (
+            <div style={{ marginBottom: 6 }}>
+              No hay tareas colgadas de una iniciativa que falte: si la iniciativa está en Fliipa, se crea primero en Plane y la tarea queda como subtarea.
+            </div>
+          )}
+          {audit.withoutInitiative.length > 0 && (
+            <div>
+              {audit.withoutInitiative.length} tarea{audit.withoutInitiative.length === 1 ? "" : "s"} sin iniciativa: van sueltas en Plane.
+            </div>
+          )}
         </div>
 
         <div

@@ -6,6 +6,8 @@ import {
   parseWorkspaceInput,
   normalizeBase,
   matchState,
+  matchMember,
+  resolvePersonNick,
   buildPlaneCsv,
   buildMigrationPackage,
   flattenWorkItems,
@@ -14,8 +16,11 @@ import {
   planeItemShouldBeRemoved,
   isPlaneGoneError,
   isRetryableProxyError,
+  auditMigration,
+  resolveTaskParentId,
   DEFAULT_PLANE_BASE,
 } from "../src/plane.js";
+import { csvToBoardSnapshot, mergeImportedInitiatives, parseImportedBoard } from "../src/importLegacy.js";
 
 let failed = 0;
 function assert(name, cond, detail) {
@@ -110,6 +115,59 @@ const pack = buildMigrationPackage({
 });
 assert("paquete tiene fuente Fliipa", pack.source === "fliipa-kanban");
 assert("paquete no incluye blobs de adjuntos", pack.tasks[0].attachments.length === 0);
+
+const members = [
+  { id: "m1", display_name: "María Fernanda Herazo Escobar", email: "mafe@fliipa.com" },
+  { id: "m2", display_name: "Oscar Ivan Briceño" },
+  { id: "m3", display_name: "William" },
+  { id: "m4", display_name: "Iván Aponte" },
+];
+assert("Mafe se relaciona con María Fernanda Herazo", matchMember(members, "Mafe")?.id === "m1");
+assert("nombre largo de Mafe también asigna", matchMember(members, "María Fernanda Herazo Herazo Escobar")?.id === "m1");
+assert("Ivan de Fliipa es Oscar Ivan, no Iván Aponte", matchMember(members, "Ivan")?.id === "m2");
+assert("Iván Aponte no se mezcla con Ivan", matchMember(members, "Iván Aponte")?.id === "m4");
+assert("si el nombre no está en Plane, no asigna (la tarea igual migra)", matchMember(members, "Alejo") == null);
+assert("apodo desde nombre duplicado", resolvePersonNick("Francisco Javier Martínez Vargas Martínez Vargas") === "Fran");
+assert("Daniel Alejandro es Alejo", resolvePersonNick("Daniel Alejandro Avilés  Avilés Montaña") === "Alejo");
+
+const audit = auditMigration({
+  initiatives: [{ id: "i1", title: "DOCUMENTACIÓN" }],
+  tasks: [
+    { id: "t1", title: "Hija", initiativeId: "i1" },
+    { id: "t2", title: "Huérfana", initiativeId: "iniciativa-que-no-existe" },
+    { id: "t3", title: "Suelta" },
+    { id: "t4", title: "En papelera", initiativeId: "i1" },
+  ],
+  deletedItems: [{ id: "t4" }],
+});
+assert("auditoría cuenta viva con iniciativa", audit.liveTasks.some((t) => t.id === "t1"));
+assert("auditoría detecta tarea sin iniciativa", audit.withoutInitiative.map((t) => t.id).join() === "t3");
+assert("auditoría detecta iniciativa que no está en Fliipa", audit.orphanInitiative.map((t) => t.id).join() === "t2");
+assert("papelera no se migra", !audit.liveTasks.some((t) => t.id === "t4"));
+assert(
+  "padre si la iniciativa vive",
+  resolveTaskParentId({ initiativeId: "i1" }, [{ id: "i1", planeWorkItemId: "plane-ini" }], {}) === "plane-ini"
+);
+assert("tarea huérfana va suelta, no se pierde", resolveTaskParentId({ initiativeId: "gone" }, [{ id: "i1" }], {}) === null);
+assert("tarea sin iniciativa no pide padre", resolveTaskParentId({ title: "Suelta" }, [{ id: "i1" }], {}) === null);
+
+const sampleCsv = `id,Subject,Type,Status,Assignee,Updated on
+1177,Documentación de Fliipa,Tarea,En progreso,María Fernanda Herazo Herazo Escobar,09/03/2026 02:14 PM
+1248,Cambios de diseño en el login del cliente,Tarea,En progreso,Francisco Javier Martínez Vargas Martínez Vargas,09/04/2026 02:03 PM
+1219,Pruebas de Servicios de Experian,Tarea,Bloqueado,Daniel Alejandro Avilés  Avilés Montaña,09/04/2026 02:00 PM
+1234,Rediseño dashboard,Tarea,Nuevo,"",09/03/2026 08:46 PM
+`;
+const snap = csvToBoardSnapshot(sampleCsv);
+assert("csv importa las 4 tareas", snap.tasks.length === 4);
+assert("csv Mafe desde María Fernanda", snap.tasks.find((t) => t.sourceId === "1177")?.assignee === "Mafe");
+assert("csv Fran desde Francisco", snap.tasks.find((t) => t.sourceId === "1248")?.assignee === "Fran");
+assert("csv Alejo desde Daniel Alejandro", snap.tasks.find((t) => t.sourceId === "1219")?.assignee === "Alejo");
+assert("csv bloqueado queda marcado", snap.tasks.find((t) => t.sourceId === "1219")?.blocked === true);
+assert("csv Experian es iniciativa", snap.tasks.find((t) => t.sourceId === "1219")?.initiativeId === "ini-experian");
+assert("csv Documentación es iniciativa", snap.tasks.find((t) => t.sourceId === "1177")?.initiativeId === "ini-documentacion");
+const merged = mergeImportedInitiatives([{ id: "existente", title: "DOCUMENTACIÓN" }], snap.initiatives);
+assert("csv no duplica iniciativa por título", merged.remap["ini-documentacion"] === "existente");
+assert("parseImportedBoard entiende CSV", parseImportedBoard(sampleCsv).tasks.length === 4);
 
 if (failed) {
   console.error(`\n${failed} prueba(s) fallaron`);

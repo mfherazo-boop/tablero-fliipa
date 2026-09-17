@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import PlaneMigrateModal from "./PlaneMigrateModal";
+import { mergeImportedInitiatives, parseImportedBoard } from "./importLegacy";
+import { foldName, resolvePersonNick } from "./plane";
 
 // ---- Design tokens ----
 // Two palettes so the dark-mode toggle in the top bar actually re-themes
@@ -71,6 +73,18 @@ function initiativeColor(ini, index = 0) {
 function idsMatch(a, b) {
   if (a == null || b == null || a === "" || b === "") return false;
   return String(a) === String(b);
+}
+
+function samePerson(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return foldName(resolvePersonNick(a)) === foldName(resolvePersonNick(b));
+}
+
+function textMatches(query, ...parts) {
+  const q = foldName(query);
+  if (!q) return true;
+  return parts.some((part) => foldName(part || "").includes(q));
 }
 
 function initiativeColumn(ini) {
@@ -491,6 +505,7 @@ export default function KanbanBoard() {
   const [saving, setSaving] = useState(false);
   const [typeFilter, setTypeFilter] = useState(null);
   const [assigneeFilter, setAssigneeFilter] = useState("Todos");
+  const [nameQuery, setNameQuery] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [initiativeFilter, setInitiativeFilter] = useState(null);
@@ -808,8 +823,18 @@ export default function KanbanBoard() {
 
   function applyImportedSnapshot(parsed) {
     if (!parsed || typeof parsed !== "object") throw new Error("Formato inválido");
-    if (Array.isArray(parsed.tasks)) setTasks((prev) => mergeById(prev, parsed.tasks));
-    if (Array.isArray(parsed.initiatives)) setInitiatives((prev) => mergeById(prev, parsed.initiatives));
+    let incomingTasks = Array.isArray(parsed.tasks) ? parsed.tasks : null;
+    if (Array.isArray(parsed.initiatives)) {
+      const { list, remap } = mergeImportedInitiatives(initiatives, parsed.initiatives);
+      setInitiatives(list);
+      if (incomingTasks) {
+        incomingTasks = incomingTasks.map((t) => ({
+          ...t,
+          initiativeId: remap[t.initiativeId] || t.initiativeId,
+        }));
+      }
+    }
+    if (incomingTasks) setTasks((prev) => mergeById(prev, incomingTasks));
     if (parsed.deletedTaskIds && typeof parsed.deletedTaskIds === "object") {
       setDeletedTaskIds((prev) => ({ ...parsed.deletedTaskIds, ...prev }));
     }
@@ -842,24 +867,43 @@ export default function KanbanBoard() {
     const today = new Date().toISOString().slice(0, 10);
     return scopedTasks.filter((t) => {
       if (typeFilter && t.type !== typeFilter) return false;
-      if (assigneeFilter !== "Todos" && t.assignee !== assigneeFilter) return false;
+      if (assigneeFilter !== "Todos" && !samePerson(t.assignee, assigneeFilter)) return false;
       if (overdueOnly && !(t.dueDate && t.dueDate < today && t.status !== "done")) return false;
       if (unassignedOnly && t.assignee) return false;
+      if (nameQuery.trim()) {
+        const ini = initiatives.find((i) => idsMatch(i.id, t.initiativeId));
+        if (
+          !textMatches(
+            nameQuery,
+            t.title,
+            t.assignee,
+            resolvePersonNick(t.assignee),
+            ini && ini.title,
+            ini && ini.owner,
+            t.description,
+            t.notes
+          )
+        ) {
+          return false;
+        }
+      }
       return true;
     });
-  }, [scopedTasks, typeFilter, assigneeFilter, overdueOnly, unassignedOnly]);
+  }, [scopedTasks, typeFilter, assigneeFilter, overdueOnly, unassignedOnly, nameQuery, initiatives]);
 
   const boardFiltersActive =
     initiativeFilter ||
     typeFilter ||
     assigneeFilter !== "Todos" ||
     overdueOnly ||
-    unassignedOnly;
+    unassignedOnly ||
+    !!nameQuery.trim();
 
   function clearBoardFilters() {
     setInitiativeFilter(null);
     setTypeFilter(null);
     setAssigneeFilter("Todos");
+    setNameQuery("");
     setOverdueOnly(false);
     setUnassignedOnly(false);
   }
@@ -990,9 +1034,12 @@ export default function KanbanBoard() {
   }
 
   const boardInitiatives = useMemo(() => {
-    if (!initiativeFilter) return initiatives;
-    return initiatives.filter((ini) => idsMatch(ini.id, initiativeFilter));
-  }, [initiatives, initiativeFilter]);
+    const list = !initiativeFilter
+      ? initiatives
+      : initiatives.filter((ini) => idsMatch(ini.id, initiativeFilter));
+    if (!nameQuery.trim()) return list;
+    return list.filter((ini) => textMatches(nameQuery, ini.title, ini.owner));
+  }, [initiatives, initiativeFilter, nameQuery]);
 
   const selectedInitiative = useMemo(
     () => initiatives.find((i) => idsMatch(i.id, initiativeFilter)) || null,
@@ -1318,7 +1365,13 @@ export default function KanbanBoard() {
                     label={`Todas ${tasks.length}`}
                     onClick={() => setInitiativeFilter(null)}
                   />
-                  {initiativeStats.map((ini) => (
+                  {initiativeStats
+                    .filter((ini) => {
+                      if (!nameQuery.trim()) return true;
+                      if (textMatches(nameQuery, ini.title, ini.owner)) return true;
+                      return filtered.some((t) => idsMatch(t.initiativeId, ini.id));
+                    })
+                    .map((ini) => (
                     <FilterChip
                       key={ini.id}
                       C={C}
@@ -1343,6 +1396,19 @@ export default function KanbanBoard() {
               >
                 <div className="fliipa-filter-controls" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: 1, minWidth: 0 }}>
                   <div className="fliipa-row-label" style={rowLabel(C)}>Filtros</div>
+                  <input
+                    value={nameQuery}
+                    onChange={(e) => setNameQuery(e.target.value)}
+                    placeholder="Buscar por nombre"
+                    aria-label="Buscar por nombre de tarea, persona o iniciativa"
+                    style={{
+                      ...filterSelect(C, !!nameQuery.trim()),
+                      cursor: "text",
+                      minWidth: 180,
+                      flex: "1 1 180px",
+                      maxWidth: 280,
+                    }}
+                  />
                   <select
                     value={assigneeFilter}
                     onChange={(e) => setAssigneeFilter(e.target.value)}
@@ -2136,12 +2202,12 @@ const INFO_TOPICS = [
     id: "plane",
     title: "Migrar a Plane",
     kicker: "Cuando dejen este Kanban",
-    body: "Migrar a Plane copia iniciativas y tareas al proyecto de Plane del equipo. Sirve para dejar de usar este tablero, no para el día a día. Hace falta la API key de Mafe y permiso de escritura.",
+    body: "Migrar a Plane copia iniciativas y tareas al proyecto de Plane del equipo. Sirve para dejar de usar este tablero, no para el día a día. Hace falta la API key de Mafe y permiso de escritura. Los títulos no tienen que coincidir con Plane: el vínculo es el ID. Una tarea cuya iniciativa ya no existe igual se migra, suelta.",
     steps: [
       "Conectar con el workspace tablero-de-tareas.",
       "Elegir el proyecto y pulsar Migrar / actualizar.",
       "Lo vivo se actualiza. Lo que ya borraste en Fliipa se quita de Plane.",
-      "En Plane usa la vista tablero (columnas) y el idioma Español en Preferencias.",
+      "Si el responsable de Fliipa no se reconoce en Plane, la tarea igual llega, sin asignar.",
     ],
   },
 ];
@@ -2304,6 +2370,10 @@ function InitiativesView({
   onEdit,
   onOpenInfo,
 }) {
+  const [nameQuery, setNameQuery] = useState("");
+  const visible = (initiatives || []).filter((ini) =>
+    textMatches(nameQuery, ini.title, ini.owner)
+  );
   return (
     <div>
       <div className="fliipa-stats">
@@ -2354,22 +2424,35 @@ function InitiativesView({
             )}
           </div>
         </div>
-        <button
-          className="fliipa-new-task"
-          onClick={onOpenNew}
-          style={{
-            background: C.accent,
-            color: C.onAccent,
-            border: "none",
-            borderRadius: 20,
-            padding: "10px 16px",
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          Nueva iniciativa
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={nameQuery}
+            onChange={(e) => setNameQuery(e.target.value)}
+            placeholder="Buscar por nombre"
+            aria-label="Buscar iniciativa por nombre"
+            style={{
+              ...filterSelect(C, !!nameQuery.trim()),
+              cursor: "text",
+              minWidth: 180,
+            }}
+          />
+          <button
+            className="fliipa-new-task"
+            onClick={onOpenNew}
+            style={{
+              background: C.accent,
+              color: C.onAccent,
+              border: "none",
+              borderRadius: 20,
+              padding: "10px 16px",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Nueva iniciativa
+          </button>
+        </div>
       </div>
 
       {saving && <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 10 }}>Guardando…</div>}
@@ -2459,7 +2542,7 @@ function InitiativesView({
             <div>Tareas</div>
             <div>% de avance</div>
           </div>
-          {initiatives.map((ini) => (
+          {visible.map((ini) => (
             <InitiativeCard
               key={ini.id}
               C={C}
@@ -2470,6 +2553,11 @@ function InitiativesView({
               onEdit={() => onEdit && onEdit(ini.id)}
             />
           ))}
+          {visible.length === 0 && (
+            <div style={{ fontSize: 13, color: C.textFaint, padding: "12px 14px" }}>
+              Ninguna iniciativa coincide con “{nameQuery.trim()}”.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -3169,7 +3257,7 @@ function ImportModal({ C, onClose, onApply }) {
 
   function handleApply() {
     try {
-      const parsed = JSON.parse(text);
+      const parsed = parseImportedBoard(text);
       onApply(parsed);
       setFeedback("ok");
       setTimeout(() => {
@@ -3189,13 +3277,13 @@ function ImportModal({ C, onClose, onApply }) {
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, width: "100%", maxWidth: 480, padding: 20 }}>
         <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600, marginBottom: 8 }}>Importar respaldo</div>
         <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 12, lineHeight: 1.5 }}>
-          Pega aquí el texto que alguien de tu equipo exportó. Se combina con lo que ya tienes — no se borra nada.
+          Pega un respaldo JSON o un CSV (id, Subject, Type, Status, Assignee). Se combina con lo que ya tienes: iniciativa, responsable y estado se conservan. No se borra nada.
         </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={10}
-          placeholder="Pega aquí el JSON exportado…"
+          placeholder="Pega JSON o el CSV de tareas…"
           style={{
             width: "100%",
             background: C.surfaceRaised,

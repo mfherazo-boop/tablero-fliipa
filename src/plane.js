@@ -241,14 +241,132 @@ function memberId(member) {
   return member.id || null;
 }
 
+export function foldName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export const PERSON_ALIASES = [
+  { nick: "Mafe", patterns: ["mafe", "maria fernanda", "herazo"] },
+  { nick: "Fran", patterns: ["fran", "francisco javier", "martinez vargas"] },
+  { nick: "Alejo", patterns: ["alejo", "daniel alejandro", "aviles"] },
+  { nick: "Aleja", patterns: ["aleja", "alejandra"] },
+  { nick: "William", patterns: ["william"] },
+  { nick: "Ivan", patterns: ["oscar ivan", "briceno"] },
+];
+
+export function cleanRepeatedName(value) {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  const parts = raw.split(" ");
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const a = foldName(parts[i]);
+    const b = foldName(parts[i + 1] || "");
+    if (a && a === b) continue;
+    if (out.length >= 2) {
+      const prev2 = foldName(out[out.length - 2] + " " + out[out.length - 1]);
+      const next2 = foldName(parts[i] + " " + (parts[i + 1] || ""));
+      if (next2 && prev2 === next2) {
+        i += 1;
+        continue;
+      }
+    }
+    out.push(parts[i]);
+  }
+  return out.join(" ");
+}
+
+export function aliasForName(name) {
+  const needle = foldName(cleanRepeatedName(name));
+  if (!needle) return null;
+  return (
+    PERSON_ALIASES.find((a) => foldName(a.nick) === needle) ||
+    PERSON_ALIASES.find((a) => a.patterns.some((p) => needle.includes(p))) ||
+    null
+  );
+}
+
+export function resolvePersonNick(name) {
+  const cleaned = cleanRepeatedName(name);
+  if (!cleaned) return "";
+  const alias = aliasForName(cleaned);
+  return alias ? alias.nick : cleaned;
+}
+
+function memberMatchesName(member, needle) {
+  const hay = foldName(memberName(member));
+  const email = foldName(member?.email || member?.member?.email || "");
+  const local = email.split("@")[0];
+  if (hay === needle || (hay && hay.includes(needle)) || (local && local === needle)) return true;
+  const tokens = `${hay} ${local}`.split(/[\s@._-]+/).filter(Boolean);
+  const needleTokens = needle.split(/[\s@._-]+/).filter(Boolean);
+  if (needleTokens.length > 1) {
+    return needleTokens.every(
+      (nt) => tokens.includes(nt) || tokens.some((tok) => tok === nt || (nt.length >= 4 && tok.startsWith(nt)))
+    );
+  }
+  return tokens.some(
+    (tok) =>
+      tok === needle ||
+      (needle.length >= 4 && tok.startsWith(needle)) ||
+      (tok.length >= 4 && needle.startsWith(tok))
+  );
+}
+
+function memberMatchesAlias(member, alias) {
+  const hay = foldName(memberName(member));
+  const email = foldName(member?.email || member?.member?.email || "");
+  const blob = `${hay} ${email}`;
+  return alias.patterns.some((p) => blob.includes(p));
+}
+
 export function matchMember(members, name) {
-  if (!name) return null;
-  const needle = String(name).trim().toLowerCase();
-  return (members || []).find((m) => {
-    const hay = memberName(m).toLowerCase();
-    const email = String(m?.email || m?.member?.email || "").toLowerCase();
-    return hay === needle || hay.includes(needle) || email.split("@")[0] === needle;
-  });
+  const cleaned = cleanRepeatedName(name);
+  const needle = foldName(cleaned);
+  if (!needle) return null;
+  const alias = aliasForName(cleaned);
+  if (alias) {
+    return (members || []).find((m) => memberMatchesAlias(m, alias)) || null;
+  }
+  return (members || []).find((m) => memberMatchesName(m, needle)) || null;
+}
+
+export function droppedIdsOf(deletedItems, deletedIds) {
+  const records =
+    deletedItems && deletedItems.length ? deletedItems : (deletedIds || []).map((id) => ({ id }));
+  return new Set(records.map((row) => String(row.id || row)).filter(Boolean));
+}
+
+export function liveMigrationItems({ tasks, initiatives, deletedItems, deletedIds } = {}) {
+  const dropped = droppedIdsOf(deletedItems, deletedIds);
+  return {
+    dropped,
+    liveTasks: (tasks || []).filter((t) => t && !dropped.has(String(t.id))),
+    liveInits: (initiatives || []).filter((i) => i && !dropped.has(String(i.id))),
+  };
+}
+
+export function resolveTaskParentId(task, liveInits, planeIds = {}) {
+  if (!task?.initiativeId) return null;
+  const initiative = (liveInits || []).find((ini) => sameId(ini.id, task.initiativeId));
+  if (!initiative) return null;
+  return planeIds[initiative.id] || planeIds[task.initiativeId] || initiative.planeWorkItemId || null;
+}
+
+export function auditMigration({ tasks, initiatives, deletedItems, deletedIds } = {}) {
+  const { liveTasks, liveInits } = liveMigrationItems({ tasks, initiatives, deletedItems, deletedIds });
+  const initIds = new Set(liveInits.map((ini) => String(ini.id)));
+  return {
+    liveTasks,
+    liveInits,
+    withoutInitiative: liveTasks.filter((t) => !t.initiativeId),
+    orphanInitiative: liveTasks.filter((t) => t.initiativeId && !initIds.has(String(t.initiativeId))),
+  };
 }
 
 async function alignPlaneLabels(cfg, labels) {
@@ -823,9 +941,7 @@ export async function migrateToPlane({
     deletedItems && deletedItems.length
       ? deletedItems
       : (deletedIds || []).map((id) => ({ id }));
-  const dropped = new Set(deletedRecords.map((row) => String(row.id || row)).filter(Boolean));
-  const liveTasks = (tasks || []).filter((t) => t && !dropped.has(String(t.id)));
-  const liveInits = (initiatives || []).filter((i) => i && !dropped.has(String(i.id)));
+  const { liveTasks, liveInits } = liveMigrationItems({ tasks, initiatives, deletedItems: deletedRecords });
   const keepIds = [...liveTasks.map((t) => t.id), ...liveInits.map((i) => i.id)];
   const states = await listStates(cfg);
   const labels = await listLabels(cfg);
@@ -893,7 +1009,7 @@ export async function migrateToPlane({
       if (kind === "task") {
         const member = matchMember(members, item.assignee);
         const initiative = liveInits.find((ini) => sameId(ini.id, item.initiativeId));
-        const parentId = item.initiativeId ? planeIds[item.initiativeId] || initiative?.planeWorkItemId : null;
+        const parentId = resolveTaskParentId(item, liveInits, planeIds);
         payload = {
           name: item.title || "Sin título",
           description_html: buildTaskHtml(item, initiative),
@@ -904,8 +1020,8 @@ export async function migrateToPlane({
           assignees: member && memberId(member) ? [memberId(member)] : [],
           external_source: PLANE_SOURCE,
           external_id: item.id,
+          parent: parentId || null,
         };
-        if (parentId) payload.parent = parentId;
       } else {
         const member = matchMember(members, item.owner);
         payload = {
@@ -924,7 +1040,7 @@ export async function migrateToPlane({
       try {
         saved = await upsertWorkItem(cfg, payload, existing?.id);
       } catch (e) {
-        if (payload.parent) {
+        if (Object.prototype.hasOwnProperty.call(payload, "parent")) {
           delete payload.parent;
           saved = await upsertWorkItem(cfg, payload, existing?.id);
         } else {
