@@ -526,7 +526,6 @@ export default function KanbanBoard() {
   const initSaveTimer = useRef(null);
   const initSaveTokenRef = useRef(0);
   const [draggingId, setDraggingId] = useState(null);
-  const [draggingKind, setDraggingKind] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
   const [dark, setDark] = useState(true);
   const [activeTab, setActiveTab] = useState("tablero");
@@ -938,10 +937,8 @@ export default function KanbanBoard() {
 
   function dropOnColumn(colId) {
     if (!draggingId) return;
-    if (draggingKind === "initiative") updateInitiative(draggingId, { status: colId });
-    else moveTask(draggingId, colId);
+    moveTask(draggingId, colId);
     setDraggingId(null);
-    setDraggingKind(null);
     setDragOverCol(null);
   }
 
@@ -1033,14 +1030,6 @@ export default function KanbanBoard() {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, blocked: !t.blocked, updatedAt: now } : t)));
   }
 
-  const boardInitiatives = useMemo(() => {
-    const list = !initiativeFilter
-      ? initiatives
-      : initiatives.filter((ini) => idsMatch(ini.id, initiativeFilter));
-    if (!nameQuery.trim()) return list;
-    return list.filter((ini) => textMatches(nameQuery, ini.title, ini.owner));
-  }, [initiatives, initiativeFilter, nameQuery]);
-
   const selectedInitiative = useMemo(
     () => initiatives.find((i) => idsMatch(i.id, initiativeFilter)) || null,
     [initiatives, initiativeFilter]
@@ -1049,12 +1038,10 @@ export default function KanbanBoard() {
   const counts = useMemo(() => {
     const m = {};
     COLUMNS.forEach((c) => {
-      const taskN = filtered.filter((t) => t.status === c.id).length;
-      const iniN = boardInitiatives.filter((ini) => initiativeColumn(ini) === c.id).length;
-      m[c.id] = taskN + iniN;
+      m[c.id] = filtered.filter((t) => t.status === c.id).length;
     });
     return m;
-  }, [filtered, boardInitiatives]);
+  }, [filtered]);
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1498,7 +1485,7 @@ export default function KanbanBoard() {
                   lineHeight: 1.45,
                 }}
               >
-                Esta iniciativa ya está en el tablero (columna Pendiente). Aún no tiene tareas: pulsa{" "}
+                Esta iniciativa no tiene tareas todavía. Pulsa{" "}
                 <strong style={{ color: C.text }}>Nueva tarea</strong> y se asignará aquí.
               </div>
             )}
@@ -1614,27 +1601,6 @@ export default function KanbanBoard() {
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {boardInitiatives
-                      .filter((ini) => initiativeColumn(ini) === col.id)
-                      .map((ini) => (
-                        <InitiativeBoardCard
-                          key={"ini-" + ini.id}
-                          C={C}
-                          initiative={ini}
-                          taskCount={(initiativeStats.find((s) => idsMatch(s.id, ini.id)) || {}).taskCount || 0}
-                          progress={(initiativeStats.find((s) => idsMatch(s.id, ini.id)) || {}).progress || 0}
-                          dragging={draggingKind === "initiative" && draggingId === ini.id}
-                          onDragStart={() => {
-                            setDraggingKind("initiative");
-                            setDraggingId(ini.id);
-                          }}
-                          onDragEnd={() => {
-                            setDraggingId(null);
-                            setDraggingKind(null);
-                          }}
-                          onOpen={() => setInitiativeFilter(ini.id)}
-                        />
-                      ))}
                     {filtered
                       .filter((t) => t.status === col.id)
                       .sort((a, b) => b.createdAt - a.createdAt)
@@ -1644,15 +1610,9 @@ export default function KanbanBoard() {
                           C={C}
                           task={task}
                           selected={openTaskId === task.id}
-                          dragging={draggingKind !== "initiative" && draggingId === task.id}
-                          onDragStart={() => {
-                            setDraggingKind("task");
-                            setDraggingId(task.id);
-                          }}
-                          onDragEnd={() => {
-                            setDraggingId(null);
-                            setDraggingKind(null);
-                          }}
+                          dragging={draggingId === task.id}
+                          onDragStart={() => setDraggingId(task.id)}
+                          onDragEnd={() => setDraggingId(null)}
                           onMoveLeft={colIdx > 0 ? () => moveByOffset(task.id, -1) : null}
                           onMoveRight={colIdx < COLUMNS.length - 1 ? () => moveByOffset(task.id, 1) : null}
                           onDelete={() => deleteTask(task.id)}
@@ -1663,7 +1623,7 @@ export default function KanbanBoard() {
                       ))}
                     {counts[col.id] === 0 && (
                       <div style={{ fontSize: 12.5, color: C.textFaint, padding: "10px 4px", textAlign: "center" }}>
-                        Sin tarjetas aquí
+                        Sin tareas aquí
                       </div>
                     )}
                   </div>
@@ -2143,7 +2103,7 @@ const INFO_TOPICS = [
     id: "columnas",
     title: "Columnas",
     kicker: "Dónde está cada cosa",
-    body: "Las columnas son el flujo del trabajo. Arrastra la tarjeta o cámbiale el estado en el detalle. El mismo orden vale para iniciativas y para tareas.",
+    body: "Las columnas son el flujo del trabajo. Arrastra la tarjeta o cámbiale el estado en el detalle.",
     steps: [
       "Pendiente: idea o aún no se arranca.",
       "Por hacer: ya está lista para que alguien la tome.",
@@ -3378,76 +3338,6 @@ function FilterChip({ C, active, label, onClick, dotColor }) {
       {dotColor && <span style={{ width: 7, height: 7, borderRadius: "50%", background: dotColor, display: "inline-block", flexShrink: 0 }} />}
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
     </button>
-  );
-}
-
-function InitiativeBoardCard({ C, initiative, taskCount, progress, dragging, onDragStart, onDragEnd, onOpen }) {
-  const color = initiativeColor(initiative);
-  const pct = Math.max(0, Math.min(100, Number(progress) || 0));
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onClick={onOpen}
-      style={{
-        background: C.surfaceRaised,
-        border: `1px solid ${C.borderSoft}`,
-        borderRadius: 12,
-        padding: "14px 14px 12px",
-        cursor: dragging ? "grabbing" : "pointer",
-        opacity: dragging ? 0.4 : 1,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: C.onAccent,
-            background: color,
-            borderRadius: 20,
-            padding: "2px 8px",
-            maxWidth: 170,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {initiative.title}
-        </span>
-        <span style={{ fontSize: 12, color: C.textFaint }}>Iniciativa</span>
-        {initiative.planeWorkItemId && (
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", color: C.accent }}>PLANE</span>
-        )}
-      </div>
-      <div style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.35, marginBottom: 10 }}>{initiative.title}</div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          background: C.surface,
-          borderRadius: 8,
-          padding: "7px 9px",
-          marginBottom: 10,
-          color: C.textMuted,
-          fontSize: 12,
-        }}
-      >
-        <span style={{ opacity: 0.7 }}>◇</span>
-        {taskCount} tarea{taskCount !== 1 ? "s" : ""}
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <span style={{ fontSize: 12.5, color: initiative.owner ? C.text : C.textMuted, fontStyle: initiative.owner ? "normal" : "italic" }}>
-          {initiative.owner || "Sin asignar"}
-        </span>
-        <span style={{ fontSize: 12, fontWeight: 700, color }}>{pct}%</span>
-      </div>
-      <div style={{ height: 6, background: C.surface, borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ width: `${pct}%`, height: "100%", background: color }} />
-      </div>
-    </div>
   );
 }
 
