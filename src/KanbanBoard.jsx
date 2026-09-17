@@ -1447,28 +1447,6 @@ export default function KanbanBoard() {
                   >
                     <StatCard C={C} label="Cerradas" value={stats.cerradas} caption="en Hecho" color={C.accent} />
                   </button>
-                  <button
-                    onClick={() => setOverdueOnly((v) => !v)}
-                    style={{
-                      flex: "1 1 160px",
-                      minWidth: 140,
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                      textAlign: "left",
-                      cursor: "pointer",
-                      color: "inherit",
-                      font: "inherit",
-                    }}
-                  >
-                    <StatCard
-                      C={C}
-                      label="Vencidas"
-                      value={stats.vencidas}
-                      caption="en el tablero"
-                      color={stats.vencidas ? C.danger : C.text}
-                    />
-                  </button>
                   <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="del export" color={C.text} />
                 </>
               ) : (
@@ -1484,7 +1462,6 @@ export default function KanbanBoard() {
                     caption={selectedInitiative ? "en curso" : "en el tablero"}
                     color={C.accent}
                   />
-                  <StatCard C={C} label="Vencidas" value={stats.vencidas} caption="en total" color={stats.vencidas ? C.danger : C.text} />
                   <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="en total" color={C.text} />
                   <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="en total" color={C.text} />
                   <StatCard
@@ -1500,7 +1477,6 @@ export default function KanbanBoard() {
             {stats.mode === "month" && !selectedInitiative && (
               <div style={{ fontSize: 13, color: C.textMuted, marginTop: -12, marginBottom: 18, lineHeight: 1.45 }}>
                 Pendiente {stats.backlog} · En progreso {stats.inProgress} · En revisión {stats.review} · Hecho {stats.cerradas}.
-                Las cerradas están en Hecho. Las vencidas (fecha pasada o sin actualizar desde el mes pasado) van a la columna Vencidas.
               </div>
             )}
 
@@ -1618,7 +1594,6 @@ export default function KanbanBoard() {
                     ))}
                   </select>
                   <FilterChip C={C} active={lastMonthOnly} label="Último mes" onClick={() => setLastMonthOnly((v) => !v)} />
-                  <FilterChip C={C} active={overdueOnly} label="Solo vencidas" onClick={() => setOverdueOnly((v) => !v)} />
                   <FilterChip C={C} active={unassignedOnly} label="Solo sin asignar" onClick={() => setUnassignedOnly((v) => !v)} />
                   <button
                     onClick={clearBoardFilters}
@@ -1757,63 +1732,6 @@ export default function KanbanBoard() {
 
             {/* Tablero */}
             <div className="fliipa-board">
-              <div
-                className="fliipa-col"
-                style={{
-                  flex: "1 1 0",
-                  minWidth: 210,
-                  background: C.surface,
-                  border: `1px solid ${overdueOnly || overdueTasks.length ? C.danger : C.borderSoft}`,
-                  borderRadius: 14,
-                  padding: 12,
-                  minHeight: 420,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 14px" }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.danger, display: "inline-block" }} />
-                    Vencidas
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: overdueTasks.length ? C.danger : C.textFaint,
-                      background: C.surfaceRaised,
-                      borderRadius: 20,
-                      padding: "1px 8px",
-                    }}
-                  >
-                    {overdueTasks.length}
-                  </span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {overdueTasks.map((task) => {
-                    const colIdx = COLUMNS.findIndex((c) => c.id === task.status);
-                    return (
-                      <TaskCard
-                        key={"overdue-" + task.id}
-                        C={C}
-                        task={task}
-                        selected={openTaskId === task.id}
-                        dragging={draggingId === task.id}
-                        onDragStart={() => setDraggingId(task.id)}
-                        onDragEnd={() => setDraggingId(null)}
-                        onMoveLeft={colIdx > 0 ? () => moveByOffset(task.id, -1) : null}
-                        onMoveRight={colIdx >= 0 && colIdx < COLUMNS.length - 1 ? () => moveByOffset(task.id, 1) : null}
-                        onDelete={() => deleteTask(task.id)}
-                        onToggleBlocked={() => toggleBlocked(task.id)}
-                        onOpen={() => setOpenTaskId(task.id)}
-                        initiative={initiatives.find((i) => idsMatch(i.id, task.initiativeId)) || null}
-                      />
-                    );
-                  })}
-                  {overdueTasks.length === 0 && (
-                    <div style={{ fontSize: 12.5, color: C.textFaint, padding: "10px 4px", textAlign: "center" }}>
-                      Nada vencido
-                    </div>
-                  )}
-                </div>
-              </div>
               {BOARD_COLUMNS.map((col, colIdx) => (
                 <div
                   className="fliipa-col"
