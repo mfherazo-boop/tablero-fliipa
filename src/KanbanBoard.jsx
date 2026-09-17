@@ -83,6 +83,15 @@ function isInLastMonth(ts) {
   return time >= lastMonthCutoff();
 }
 
+function isOverdueTask(task) {
+  if (!task || task.status === "done") return false;
+  const today = new Date().toISOString().slice(0, 10);
+  if (task.dueDate && task.dueDate < today) return true;
+  const ts = task.updatedAt || task.statusChangedAt || task.createdAt;
+  if (!ts) return false;
+  return Number(ts) < lastMonthCutoff();
+}
+
 function isLastMonthExport(task) {
   if (!task) return false;
   const ts = task.updatedAt || task.statusChangedAt || task.createdAt;
@@ -909,11 +918,10 @@ export default function KanbanBoard() {
   }, [boardPool, initiativeFilter]);
 
   const filtered = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     return scopedTasks.filter((t) => {
       if (typeFilter && t.type !== typeFilter) return false;
       if (assigneeFilter !== "Todos" && !samePerson(t.assignee, assigneeFilter)) return false;
-      if (overdueOnly && !(t.dueDate && t.dueDate < today && t.status !== "done")) return false;
+      if (overdueOnly && !isOverdueTask(t)) return false;
       if (unassignedOnly && t.assignee) return false;
       if (nameQuery.trim()) {
         const ini = initiatives.find((i) => idsMatch(i.id, t.initiativeId));
@@ -936,6 +944,36 @@ export default function KanbanBoard() {
     });
   }, [scopedTasks, typeFilter, assigneeFilter, overdueOnly, unassignedOnly, nameQuery, initiatives]);
 
+  const overdueTasks = useMemo(() => {
+    return tasks
+      .filter((t) => {
+        if (!isOverdueTask(t)) return false;
+        if (initiativeFilter && !idsMatch(t.initiativeId, initiativeFilter)) return false;
+        if (typeFilter && t.type !== typeFilter) return false;
+        if (assigneeFilter !== "Todos" && !samePerson(t.assignee, assigneeFilter)) return false;
+        if (unassignedOnly && t.assignee) return false;
+        if (nameQuery.trim()) {
+          const ini = initiatives.find((i) => idsMatch(i.id, t.initiativeId));
+          if (
+            !textMatches(
+              nameQuery,
+              t.title,
+              t.assignee,
+              resolvePersonNick(t.assignee),
+              ini && ini.title,
+              ini && ini.owner,
+              t.description,
+              t.notes
+            )
+          ) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+  }, [tasks, initiativeFilter, typeFilter, assigneeFilter, unassignedOnly, nameQuery, initiatives]);
+
   const boardFiltersActive =
     initiativeFilter ||
     typeFilter ||
@@ -954,7 +992,6 @@ export default function KanbanBoard() {
   }
 
   const initiativeStats = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     return initiatives.map((ini, index) => {
       const related = tasks.filter((t) => idsMatch(t.initiativeId, ini.id));
       const done = related.filter((t) => t.status === "done").length;
@@ -962,7 +999,7 @@ export default function KanbanBoard() {
         ...ini,
         color: initiativeColor(ini, index),
         taskCount: related.length,
-        vencidas: related.filter((t) => t.dueDate && t.dueDate < today && t.status !== "done").length,
+        vencidas: related.filter((t) => isOverdueTask(t)).length,
         sinAsignar: related.filter((t) => !t.assignee).length,
         closed: done,
         progress: weightedInitiativeProgress(related, ini.progress),
@@ -971,7 +1008,6 @@ export default function KanbanBoard() {
   }, [initiatives, tasks]);
 
   const boardInitiativeStats = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     return initiatives.map((ini, index) => {
       const related = boardPool.filter((t) => idsMatch(t.initiativeId, ini.id));
       const done = related.filter((t) => t.status === "done").length;
@@ -979,7 +1015,7 @@ export default function KanbanBoard() {
         ...ini,
         color: initiativeColor(ini, index),
         taskCount: related.length,
-        vencidas: related.filter((t) => t.dueDate && t.dueDate < today && t.status !== "done").length,
+        vencidas: related.filter((t) => isOverdueTask(t)).length,
         sinAsignar: related.filter((t) => !t.assignee).length,
         closed: done,
         progress: weightedInitiativeProgress(related, ini.progress),
@@ -1101,13 +1137,12 @@ export default function KanbanBoard() {
   const counts = useMemo(() => {
     const m = {};
     COLUMNS.forEach((c) => {
-      m[c.id] = filtered.filter((t) => t.status === c.id).length;
+      m[c.id] = filtered.filter((t) => t.status === c.id && !isOverdueTask(t)).length;
     });
     return m;
   }, [filtered]);
 
   const stats = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     const sevenDays = 7 * 86400000;
     const list = scopedTasks;
     const active = list.filter((t) => t.status !== "done");
@@ -1115,37 +1150,37 @@ export default function KanbanBoard() {
       return {
         mode: "month",
         total: list.length,
-        enCurso: active.length,
+        enCurso: active.filter((t) => !isOverdueTask(t)).length,
         cerradas: list.filter((t) => t.status === "done").length,
+        vencidas: overdueTasks.length,
         bloqueadas: list.filter((t) => t.blocked).length,
         sinAsignar: list.filter((t) => !t.assignee).length,
-        review: list.filter((t) => t.status === "review").length,
-        inProgress: list.filter((t) => t.status === "in_progress").length,
-        backlog: list.filter((t) => t.status === "backlog").length,
+        review: list.filter((t) => t.status === "review" && !isOverdueTask(t)).length,
+        inProgress: list.filter((t) => t.status === "in_progress" && !isOverdueTask(t)).length,
+        backlog: list.filter((t) => t.status === "backlog" && !isOverdueTask(t)).length,
       };
     }
     return {
       mode: "board",
-      total: active.length,
-      vencidas: active.filter((t) => t.dueDate && t.dueDate < today).length,
+      total: active.filter((t) => !isOverdueTask(t)).length,
+      vencidas: overdueTasks.length,
       sinAsignar: active.filter((t) => !t.assignee).length,
       bloqueadas: active.filter((t) => t.blocked).length,
       cambioEstado: active.filter(
         (t) => t.statusChangedAt && Date.now() - t.statusChangedAt <= sevenDays
       ).length,
     };
-  }, [scopedTasks, lastMonthOnly]);
+  }, [scopedTasks, lastMonthOnly, overdueTasks]);
   const doneTasks = useMemo(
     () => filtered.filter((t) => t.status === "done"),
     [filtered]
   );
 
   const boardStats = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
     const sevenDays = 7 * 86400000;
     return {
       total: tasks.length,
-      vencidas: tasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== "done").length,
+      vencidas: tasks.filter((t) => isOverdueTask(t)).length,
       sinAsignar: tasks.filter((t) => !t.assignee).length,
       bloqueadas: tasks.filter((t) => t.blocked).length,
       cambioEstado: tasks.filter(
@@ -1412,8 +1447,29 @@ export default function KanbanBoard() {
                   >
                     <StatCard C={C} label="Cerradas" value={stats.cerradas} caption="en Hecho" color={C.accent} />
                   </button>
+                  <button
+                    onClick={() => setOverdueOnly((v) => !v)}
+                    style={{
+                      flex: "1 1 160px",
+                      minWidth: 140,
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      textAlign: "left",
+                      cursor: "pointer",
+                      color: "inherit",
+                      font: "inherit",
+                    }}
+                  >
+                    <StatCard
+                      C={C}
+                      label="Vencidas"
+                      value={stats.vencidas}
+                      caption="en el tablero"
+                      color={stats.vencidas ? C.danger : C.text}
+                    />
+                  </button>
                   <StatCard C={C} label="Bloqueadas" value={stats.bloqueadas} caption="del export" color={C.text} />
-                  <StatCard C={C} label="Sin asignar" value={stats.sinAsignar} caption="del export" color={C.text} />
                 </>
               ) : (
                 <>
@@ -1444,7 +1500,7 @@ export default function KanbanBoard() {
             {stats.mode === "month" && !selectedInitiative && (
               <div style={{ fontSize: 13, color: C.textMuted, marginTop: -12, marginBottom: 18, lineHeight: 1.45 }}>
                 Pendiente {stats.backlog} · En progreso {stats.inProgress} · En revisión {stats.review} · Hecho {stats.cerradas}.
-                Las cerradas están en la pestaña Hecho; aquí queda el trabajo que sigue abierto.
+                Las cerradas están en Hecho. Las vencidas (fecha pasada o sin actualizar desde el mes pasado) van a la columna Vencidas.
               </div>
             )}
 
@@ -1701,6 +1757,63 @@ export default function KanbanBoard() {
 
             {/* Tablero */}
             <div className="fliipa-board">
+              <div
+                className="fliipa-col"
+                style={{
+                  flex: "1 1 0",
+                  minWidth: 210,
+                  background: C.surface,
+                  border: `1px solid ${overdueOnly || overdueTasks.length ? C.danger : C.borderSoft}`,
+                  borderRadius: 14,
+                  padding: 12,
+                  minHeight: 420,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 14px" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.danger, display: "inline-block" }} />
+                    Vencidas
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: overdueTasks.length ? C.danger : C.textFaint,
+                      background: C.surfaceRaised,
+                      borderRadius: 20,
+                      padding: "1px 8px",
+                    }}
+                  >
+                    {overdueTasks.length}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {overdueTasks.map((task) => {
+                    const colIdx = COLUMNS.findIndex((c) => c.id === task.status);
+                    return (
+                      <TaskCard
+                        key={"overdue-" + task.id}
+                        C={C}
+                        task={task}
+                        selected={openTaskId === task.id}
+                        dragging={draggingId === task.id}
+                        onDragStart={() => setDraggingId(task.id)}
+                        onDragEnd={() => setDraggingId(null)}
+                        onMoveLeft={colIdx > 0 ? () => moveByOffset(task.id, -1) : null}
+                        onMoveRight={colIdx >= 0 && colIdx < COLUMNS.length - 1 ? () => moveByOffset(task.id, 1) : null}
+                        onDelete={() => deleteTask(task.id)}
+                        onToggleBlocked={() => toggleBlocked(task.id)}
+                        onOpen={() => setOpenTaskId(task.id)}
+                        initiative={initiatives.find((i) => idsMatch(i.id, task.initiativeId)) || null}
+                      />
+                    );
+                  })}
+                  {overdueTasks.length === 0 && (
+                    <div style={{ fontSize: 12.5, color: C.textFaint, padding: "10px 4px", textAlign: "center" }}>
+                      Nada vencido
+                    </div>
+                  )}
+                </div>
+              </div>
               {BOARD_COLUMNS.map((col, colIdx) => (
                 <div
                   className="fliipa-col"
@@ -1745,7 +1858,7 @@ export default function KanbanBoard() {
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {filtered
-                      .filter((t) => t.status === col.id)
+                      .filter((t) => t.status === col.id && !isOverdueTask(t))
                       .sort((a, b) => b.createdAt - a.createdAt)
                       .map((task) => (
                         <TaskCard
@@ -3795,8 +3908,7 @@ function FilterChip({ C, active, label, onClick, dotColor }) {
 function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveLeft, onMoveRight, onDelete, onToggleBlocked, onOpen, initiative }) {
   const [hover, setHover] = useState(false);
   const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
-  const today = new Date().toISOString().slice(0, 10);
-  const isOverdue = task.dueDate && task.dueDate < today && task.status !== "done";
+  const isOverdue = isOverdueTask(task);
   const iniColor = initiative ? initiativeColor(initiative) : typeMeta.color;
   const shortIni = initiative ? initiative.title : null;
   return (
@@ -3812,7 +3924,7 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
       onMouseLeave={() => setHover(false)}
       style={{
         background: C.surfaceRaised,
-        border: `1px solid ${selected ? C.accent : C.borderSoft}`,
+        border: `1px solid ${selected ? C.accent : isOverdue ? C.danger : C.borderSoft}`,
         borderRadius: 12,
         padding: "14px 14px 12px",
         cursor: dragging ? "grabbing" : "pointer",
@@ -3939,7 +4051,7 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
             style={{
               fontSize: 11,
               fontWeight: 600,
-              color: C.textMuted,
+              color: isOverdue ? C.danger : C.textMuted,
               background: C.surface,
               borderRadius: 20,
               padding: "3px 8px",
