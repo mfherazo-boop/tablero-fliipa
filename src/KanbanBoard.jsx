@@ -58,6 +58,7 @@ const COLUMNS = [
   { id: "review", label: "En revisión", dot: "#3EE0B4" },
   { id: "done", label: "Hecho", dot: "#3EE0B4" },
 ];
+const BOARD_COLUMNS = COLUMNS.filter((c) => c.id !== "done");
 
 const ROSTER = ["Mafe", "William", "Alejo", "Aleja", "Fran", "Ivan"];
 const AVATAR_COLORS = ["#3EE0B4", "#8B8CFF", "#5B8CFF", "#F0C14B", "#F07178", "#B48EDE"];
@@ -480,6 +481,15 @@ function recentlyChangedStatus(task) {
   if (!task || !task.statusChangedAt) return false;
   if (task.createdAt && Math.abs(task.statusChangedAt - task.createdAt) < 60000) return false;
   return Date.now() - task.statusChangedAt <= 7 * 86400000;
+}
+
+function formatDoneDate(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleDateString("es-CO", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function formatUpdated(ts) {
@@ -1046,17 +1056,21 @@ export default function KanbanBoard() {
   const stats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const sevenDays = 7 * 86400000;
-    const list = scopedTasks;
+    const active = scopedTasks.filter((t) => t.status !== "done");
     return {
-      total: list.length,
-      vencidas: list.filter((t) => t.dueDate && t.dueDate < today && t.status !== "done").length,
-      sinAsignar: list.filter((t) => !t.assignee).length,
-      bloqueadas: list.filter((t) => t.blocked).length,
-      cambioEstado: list.filter(
+      total: active.length,
+      vencidas: active.filter((t) => t.dueDate && t.dueDate < today).length,
+      sinAsignar: active.filter((t) => !t.assignee).length,
+      bloqueadas: active.filter((t) => t.blocked).length,
+      cambioEstado: active.filter(
         (t) => t.statusChangedAt && Date.now() - t.statusChangedAt <= sevenDays
       ).length,
     };
   }, [scopedTasks]);
+  const doneTasks = useMemo(
+    () => filtered.filter((t) => t.status === "done"),
+    [filtered]
+  );
 
   const boardStats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -1266,6 +1280,16 @@ export default function KanbanBoard() {
             C={C}
             onGoInitiatives={() => setActiveTab("iniciativas")}
             onGoBoard={() => setActiveTab("tablero")}
+            onGoDone={() => setActiveTab("hecho")}
+          />
+        ) : activeTab === "hecho" ? (
+          <DoneArchiveView
+            C={C}
+            tasks={tasks}
+            initiatives={initiatives}
+            onOpen={(id) => setOpenTaskId(id)}
+            onReopen={(id) => updateTask(id, { status: "review" })}
+            onDelete={deleteTask}
           />
         ) : activeTab === "iniciativas" ? (
           <InitiativesView
@@ -1298,7 +1322,7 @@ export default function KanbanBoard() {
                     : "Tareas"
                 }
                 value={stats.total}
-                caption={selectedInitiative ? "en la iniciativa" : "en total"}
+                caption={selectedInitiative ? "en curso" : "en el tablero"}
                 color={C.accent}
               />
               <StatCard C={C} label="Vencidas" value={stats.vencidas} caption="en total" color={stats.vencidas ? C.danger : C.text} />
@@ -1349,12 +1373,14 @@ export default function KanbanBoard() {
                   <FilterChip
                     C={C}
                     active={!initiativeFilter}
-                    label={`Todas ${tasks.length}`}
+                    label={`Todas ${tasks.filter((t) => t.status !== "done").length}`}
                     onClick={() => setInitiativeFilter(null)}
                   />
                   {initiativeStats
                     .filter((ini) => {
-                      if (!nameQuery.trim()) return true;
+                      const activeN = Math.max(0, (ini.taskCount || 0) - (ini.closed || 0));
+                      const selected = idsMatch(initiativeFilter, ini.id);
+                      if (!nameQuery.trim()) return selected || activeN > 0;
                       if (textMatches(nameQuery, ini.title, ini.owner)) return true;
                       return filtered.some((t) => idsMatch(t.initiativeId, ini.id));
                     })
@@ -1363,7 +1389,7 @@ export default function KanbanBoard() {
                       key={ini.id}
                       C={C}
                       active={idsMatch(initiativeFilter, ini.id)}
-                      label={`${ini.title} ${ini.taskCount}`}
+                      label={`${ini.title} ${Math.max(0, (ini.taskCount || 0) - (ini.closed || 0))}`}
                       dotColor={ini.color}
                       onClick={() => setInitiativeFilter(idsMatch(initiativeFilter, ini.id) ? null : ini.id)}
                     />
@@ -1558,7 +1584,7 @@ export default function KanbanBoard() {
 
             {/* Tablero */}
             <div className="fliipa-board">
-              {COLUMNS.map((col, colIdx) => (
+              {BOARD_COLUMNS.map((col, colIdx) => (
                 <div
                   className="fliipa-col"
                   key={col.id}
@@ -1614,7 +1640,7 @@ export default function KanbanBoard() {
                           onDragStart={() => setDraggingId(task.id)}
                           onDragEnd={() => setDraggingId(null)}
                           onMoveLeft={colIdx > 0 ? () => moveByOffset(task.id, -1) : null}
-                          onMoveRight={colIdx < COLUMNS.length - 1 ? () => moveByOffset(task.id, 1) : null}
+                          onMoveRight={() => moveByOffset(task.id, 1)}
                           onDelete={() => deleteTask(task.id)}
                           onToggleBlocked={() => toggleBlocked(task.id)}
                           onOpen={() => setOpenTaskId(task.id)}
@@ -1629,6 +1655,77 @@ export default function KanbanBoard() {
                   </div>
                 </div>
               ))}
+              <div
+                className="fliipa-col"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverCol("done");
+                }}
+                onDragLeave={() => setDragOverCol(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  dropOnColumn("done");
+                }}
+                style={{
+                  flex: "1 1 0",
+                  minWidth: 210,
+                  background: C.surface,
+                  border: `1px dashed ${dragOverCol === "done" ? C.accent : C.border}`,
+                  borderRadius: 14,
+                  padding: 12,
+                  minHeight: 420,
+                  transition: "border-color 120ms ease",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 14px" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#3EE0B4", display: "inline-block" }} />
+                    Hecho
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: C.textFaint,
+                      background: C.surfaceRaised,
+                      borderRadius: 20,
+                      padding: "1px 8px",
+                    }}
+                  >
+                    {doneTasks.length}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 12,
+                    minHeight: 280,
+                    padding: "18px 10px",
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.45 }}>
+                    Al mover una tarea aquí sale del tablero y queda guardada en el archivo.
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("hecho")}
+                    style={{
+                      background: C.accentSoft,
+                      color: C.accent,
+                      border: "none",
+                      borderRadius: 20,
+                      padding: "8px 14px",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Ver archivo{doneTasks.length ? ` · ${doneTasks.length}` : ""}
+                  </button>
+                </div>
+              </div>
             </div>
           </>
         )}
@@ -1990,6 +2087,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             {[
               { id: "iniciativas", label: "Iniciativas" },
               { id: "tablero", label: "Tablero" },
+              { id: "hecho", label: "Hecho" },
               { id: "info", label: "Información" },
             ].map((tab) => (
               <button
@@ -2109,7 +2207,7 @@ const INFO_TOPICS = [
       "Por hacer: ya está lista para que alguien la tome.",
       "En progreso: se está haciendo ahora.",
       "En revisión: alguien la está revisando o validando.",
-      "Hecho: terminada. Cuenta 100 % en el avance de la iniciativa.",
+      "Hecho: terminada. Sale del tablero y queda en la pestaña Hecho.",
     ],
   },
   {
@@ -2128,7 +2226,7 @@ const INFO_TOPICS = [
     id: "tablero",
     title: "Tablero",
     kicker: "La vista de columnas",
-    body: "El tablero es el Kanban: columnas con tarjetas. Arriba puedes filtrar por iniciativa, responsable, tipo o texto. Las métricas (vencidas, sin asignar, bloqueadas) cuentan lo que ves en pantalla.",
+    body: "El tablero es el Kanban: columnas con el trabajo que todavía está en curso. Arriba puedes filtrar por iniciativa, responsable, tipo o texto. Lo que ya terminaste no se queda aquí: pasa al archivo de Hecho.",
     steps: [
       "Usa “Todas” para ver el trabajo completo del equipo.",
       "Filtra una iniciativa para concentrarte en un solo objetivo.",
@@ -2145,6 +2243,17 @@ const INFO_TOPICS = [
       "Si no hay tareas, puedes ajustar el % a mano con + y − en la fila.",
       "Cuando hay tareas, el % sigue a las columnas. Mover a Hecho es lo que más sube.",
       "Una iniciativa en Hecho no cierra sola las tareas: hay que moverlas también.",
+    ],
+  },
+  {
+    id: "hecho",
+    title: "Hecho",
+    kicker: "El archivo de lo terminado",
+    body: "Cuando una tarea llega a Hecho deja de ocupar el tablero. Queda en la pestaña Hecho, en una lista como la de iniciativas. Sigue contando 100 % en el avance de su iniciativa. Si hace falta, se puede reabrir.",
+    steps: [
+      "Arrastra la tarjeta a la columna Hecho, o muévela desde el detalle.",
+      "Abre la pestaña Hecho para ver el archivo: título, iniciativa, responsable y fecha.",
+      "Reabrir la devuelve a En revisión. Eliminar la manda a Papelera.",
     ],
   },
   {
@@ -2172,7 +2281,7 @@ const INFO_TOPICS = [
   },
 ];
 
-function InfoView({ C, onGoInitiatives, onGoBoard }) {
+function InfoView({ C, onGoInitiatives, onGoBoard, onGoDone }) {
   const [topicId, setTopicId] = useState("iniciativa");
   const topic = INFO_TOPICS.find((item) => item.id === topicId) || INFO_TOPICS[1];
 
@@ -2200,7 +2309,7 @@ function InfoView({ C, onGoInitiatives, onGoBoard }) {
           {[
             { title: "1. Iniciativa", text: "El resultado que el equipo quiere.", go: onGoInitiatives, label: "Ir a Iniciativas" },
             { title: "2. Tareas", text: "El trabajo de cada persona, con fecha y tipo.", go: onGoBoard, label: "Ir al Tablero" },
-            { title: "3. Columnas", text: "Pendiente → Por hacer → En progreso → En revisión → Hecho." },
+            { title: "3. Columnas", text: "Pendiente → Por hacer → En progreso → En revisión. Lo hecho va al archivo.", go: onGoDone, label: "Ir a Hecho" },
             { title: "4. Avance", text: "El % de la iniciativa sube al mover sus tareas." },
           ].map((card) => (
             <div
@@ -2520,6 +2629,231 @@ function InitiativesView({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function DoneArchiveView({ C, tasks, initiatives, onOpen, onReopen, onDelete }) {
+  const [nameQuery, setNameQuery] = useState("");
+  const [assigneeFilter, setAssigneeFilter] = useState("Todos");
+  const done = useMemo(
+    () => (tasks || []).filter((t) => t.status === "done"),
+    [tasks]
+  );
+  const assignees = useMemo(() => {
+    const set = new Set(done.map((t) => t.assignee).filter(Boolean));
+    return ["Todos", ...Array.from(set).sort()];
+  }, [done]);
+  const visible = useMemo(() => {
+    return done
+      .filter((t) => {
+        if (assigneeFilter !== "Todos" && !samePerson(t.assignee, assigneeFilter)) return false;
+        if (!nameQuery.trim()) return true;
+        const ini = (initiatives || []).find((i) => idsMatch(i.id, t.initiativeId));
+        return textMatches(
+          nameQuery,
+          t.title,
+          t.assignee,
+          resolvePersonNick(t.assignee),
+          ini && ini.title,
+          t.description,
+          t.notes
+        );
+      })
+      .sort((a, b) => (b.statusChangedAt || b.updatedAt || 0) - (a.statusChangedAt || a.updatedAt || 0));
+  }, [done, assigneeFilter, nameQuery, initiatives]);
+  const week = done.filter((t) => t.statusChangedAt && Date.now() - t.statusChangedAt <= 7 * 86400000).length;
+  const withIni = done.filter((t) => t.initiativeId).length;
+
+  return (
+    <div>
+      <div className="fliipa-stats">
+        <StatCard C={C} label="Hechas" value={done.length} caption="en el archivo" color={C.accent} />
+        <StatCard C={C} label="Esta semana" value={week} caption="recién cerradas" color={C.text} />
+        <StatCard C={C} label="Con iniciativa" value={withIni} caption="vinculadas" color={C.text} />
+        <StatCard C={C} label="Sin iniciativa" value={done.length - withIni} caption="sueltas" color={C.text} />
+        <StatCard
+          C={C}
+          label="Sin asignar"
+          value={done.filter((t) => !t.assignee).length}
+          caption="en el archivo"
+          color={C.text}
+        />
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          flexWrap: "wrap",
+          gap: 16,
+          marginBottom: 18,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Archivo de tareas hechas</div>
+          <div style={{ fontSize: 13, color: C.textMuted }}>
+            Al pasar una tarea a Hecho sale del tablero y queda aquí. Clic en una fila abre el detalle. Reabrir la vuelve a En revisión.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={nameQuery}
+            onChange={(e) => setNameQuery(e.target.value)}
+            placeholder="Buscar por nombre"
+            aria-label="Buscar tarea hecha por nombre"
+            style={{
+              ...filterSelect(C, !!nameQuery.trim()),
+              cursor: "text",
+              minWidth: 180,
+            }}
+          />
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            style={filterSelect(C, assigneeFilter !== "Todos")}
+          >
+            {assignees.map((a) => (
+              <option key={a} value={a}>
+                {a === "Todos" ? "Responsable" : a}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {done.length === 0 ? (
+        <div
+          style={{
+            fontSize: 13,
+            color: C.textFaint,
+            border: `1px dashed ${C.border}`,
+            borderRadius: 10,
+            padding: "22px 16px",
+            textAlign: "center",
+            marginBottom: 26,
+          }}
+        >
+          Aún no hay tareas en Hecho. Arrástralas a la columna Hecho del tablero y aparecerán aquí.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 26 }} className="fliipa-init-list">
+          <div
+            className="fliipa-init-head"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(180px, 2fr) minmax(120px, 1fr) 140px 120px auto",
+              gap: 10,
+              padding: "0 14px",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              color: C.textFaint,
+            }}
+          >
+            <div>Tarea</div>
+            <div>Iniciativa</div>
+            <div>Responsable</div>
+            <div>Cerrada</div>
+          </div>
+          {visible.map((task) => (
+            <DoneTaskRow
+              key={task.id}
+              C={C}
+              task={task}
+              initiative={(initiatives || []).find((i) => idsMatch(i.id, task.initiativeId)) || null}
+              onOpen={() => onOpen && onOpen(task.id)}
+              onReopen={() => onReopen && onReopen(task.id)}
+              onDelete={() => onDelete && onDelete(task.id)}
+            />
+          ))}
+          {visible.length === 0 && (
+            <div style={{ fontSize: 13, color: C.textFaint, padding: "12px 14px" }}>
+              Ninguna tarea hecha coincide con el filtro.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DoneTaskRow({ C, task, initiative, onOpen, onReopen, onDelete }) {
+  const [hover, setHover] = useState(false);
+  const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
+  const color = initiative ? initiativeColor(initiative) : typeMeta.color;
+  return (
+    <div
+      className="fliipa-init-row"
+      onClick={onOpen}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        background: C.surface,
+        border: `1px solid ${C.borderSoft}`,
+        borderRadius: 10,
+        padding: "14px 16px",
+        display: "grid",
+        gridTemplateColumns: "minmax(180px, 2fr) minmax(120px, 1fr) 140px 120px auto",
+        gap: 10,
+        alignItems: "center",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <span style={{ width: 10, height: 10, borderRadius: 3, background: color, flexShrink: 0 }} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {task.title}
+          </div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginTop: 2 }}>
+            #{taskNumber(task)} · {typeMeta.label}
+          </div>
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: C.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {initiative ? initiative.title : "Sin iniciativa"}
+      </div>
+      <div style={{ fontSize: 13, color: task.assignee ? C.textMuted : C.textFaint, fontStyle: task.assignee ? "normal" : "italic" }}>
+        {task.assignee || "Sin asignar"}
+      </div>
+      <div style={{ fontSize: 13, color: C.textFaint }}>
+        {formatDoneDate(task.statusChangedAt || task.updatedAt)}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onReopen && onReopen();
+          }}
+          aria-label="Reabrir tarea"
+          title="Reabrir en En revisión"
+          style={{
+            background: hover ? C.surfaceRaised : "none",
+            border: "none",
+            color: C.accent,
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 700,
+            lineHeight: 1,
+            padding: "4px 8px",
+            borderRadius: 6,
+          }}
+        >
+          Reabrir
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete && onDelete();
+          }}
+          aria-label="Eliminar tarea"
+          style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 2 }}
+        >
+          ✕
+        </button>
+      </div>
     </div>
   );
 }
