@@ -4,15 +4,15 @@ const AVATAR_COLORS = ["#3EE0B4", "#8B8CFF", "#5B8CFF", "#F0C14B", "#F07178", "#
 
 const STATUS_MAP = {
   nuevo: { status: "backlog", blocked: false },
-  "por hacer": { status: "todo", blocked: false },
+  "por hacer": { status: "backlog", blocked: false },
   "en progreso": { status: "in_progress", blocked: false },
   "en revision": { status: "review", blocked: false },
   "en revisión": { status: "review", blocked: false },
   cerrado: { status: "done", blocked: false },
   hecho: { status: "done", blocked: false },
-  bloqueado: { status: "in_progress", blocked: true },
-  "in testing": { status: "review", blocked: false },
-  "test failed": { status: "in_progress", blocked: true },
+  bloqueado: { status: "blocked", blocked: true },
+  "in testing": { status: "dev_qa", blocked: false },
+  "test failed": { status: "blocked", blocked: true },
 };
 
 const PREFIX_INITIATIVE = {
@@ -185,9 +185,9 @@ export function csvToBoardSnapshot(text) {
     const owner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
     const open = related.filter((t) => t.status !== "done");
     let status = "backlog";
-    if (related.every((t) => t.status === "done")) status = "done";
-    else if (open.some((t) => t.status === "in_progress" || t.status === "review")) status = "in_progress";
-    else if (open.some((t) => t.status === "todo")) status = "todo";
+    if (related.length && related.every((t) => t.status === "done")) status = "done";
+    else if (open.some((t) => ["in_progress", "review", "dev_qa", "product_qa"].includes(t.status))) status = "in_progress";
+    else if (open.some((t) => t.status === "blocked")) status = "blocked";
     const updatedAt = Math.max(...related.map((t) => t.updatedAt || 0));
     return {
       id: "ini-" + slugTitle(title),

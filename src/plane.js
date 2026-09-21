@@ -11,18 +11,25 @@ const TYPE_COLORS = {
 
 const COLUMN_HINTS = {
   backlog: { groups: ["backlog"], names: ["backlog", "pendiente"] },
-  todo: { groups: ["unstarted"], names: ["todo", "to do", "por hacer", "to-do"] },
-  in_progress: { groups: ["started"], names: ["in progress", "progress", "progreso", "doing", "started"] },
-  review: { groups: ["started"], names: ["review", "revisión", "revision", "en revisión"] },
-  done: { groups: ["completed"], names: ["done", "hecho", "completed", "complete", "cerrado"] },
+  blocked: { groups: ["started", "backlog"], names: ["blocked", "bloqueado"] },
+  in_progress: {
+    groups: ["started"],
+    names: ["in development", "development", "in progress", "progress", "progreso", "doing", "started"],
+  },
+  review: { groups: ["started"], names: ["pr review", "review", "revisión", "revision", "en revisión"] },
+  dev_qa: { groups: ["started"], names: ["dev qa", "qa dev"] },
+  product_qa: { groups: ["started"], names: ["product qa", "qa product"] },
+  done: { groups: ["completed"], names: ["completado", "done", "hecho", "completed", "complete", "cerrado"] },
 };
 
 const FLIIPA_STATE_STYLE = {
-  backlog: { name: "Pendiente", color: "#C5CAD8" },
-  todo: { name: "Por hacer", color: "#8B8CFF" },
-  in_progress: { name: "En progreso", color: "#5B8CFF" },
-  review: { name: "En revisión", color: "#B48EDE" },
-  done: { name: "Hecho", color: "#3EE0B4" },
+  backlog: { name: "Backlog", color: "#C5CAD8" },
+  blocked: { name: "Blocked", color: "#F07178" },
+  in_progress: { name: "In development", color: "#5B8CFF" },
+  review: { name: "PR review", color: "#B48EDE" },
+  dev_qa: { name: "Dev QA", color: "#F0C14B" },
+  product_qa: { name: "Product QA", color: "#8B8CFF" },
+  done: { name: "Completado", color: "#3EE0B4" },
 };
 
 export function normalizeBase(url) {
@@ -220,7 +227,7 @@ export async function listMembers(cfg) {
 }
 
 export function matchState(states, columnId) {
-  const hint = COLUMN_HINTS[columnId] || COLUMN_HINTS.todo;
+  const hint = COLUMN_HINTS[columnId] || COLUMN_HINTS.backlog;
   const list = states || [];
   const byName = list.find((s) => hint.names.some((n) => String(s.name || "").toLowerCase().includes(n)));
   if (byName) return byName;
@@ -402,21 +409,24 @@ async function ensureLabel(cfg, labels, name, color) {
   return created;
 }
 
-async function ensureReviewState(cfg, states) {
-  if (matchState(states, "review") && /review|revis/i.test(matchState(states, "review").name || "")) {
-    return matchState(states, "review");
-  }
+async function ensurePipelineState(cfg, states, columnId, fallbackColumnId) {
+  const style = FLIIPA_STATE_STYLE[columnId];
+  const hint = COLUMN_HINTS[columnId];
+  const existing = matchState(states, columnId);
+  const looksRight =
+    existing && hint && hint.names.some((n) => String(existing.name || "").toLowerCase().includes(n));
+  if (looksRight) return existing;
   try {
     const created = await planeRequest({
       ...cfg,
       method: "POST",
       path: `/workspaces/${encodeURIComponent(cfg.workspace)}/projects/${cfg.projectId}/states/`,
-      body: { name: "En revisión", color: "#B48EDE", group: "started" },
+      body: { name: style.name, color: style.color, group: "started" },
     });
     states.push(created);
     return created;
   } catch (e) {
-    return matchState(states, "in_progress");
+    return matchState(states, fallbackColumnId || "in_progress");
   }
 }
 
@@ -438,8 +448,11 @@ async function patchState(cfg, state, body) {
 }
 
 async function alignPlaneStates(cfg, states) {
-  await ensureReviewState(cfg, states);
-  for (const columnId of ["backlog", "todo", "in_progress", "review", "done"]) {
+  await ensurePipelineState(cfg, states, "review", "in_progress");
+  await ensurePipelineState(cfg, states, "blocked", "in_progress");
+  await ensurePipelineState(cfg, states, "dev_qa", "review");
+  await ensurePipelineState(cfg, states, "product_qa", "dev_qa");
+  for (const columnId of ["backlog", "blocked", "in_progress", "review", "dev_qa", "product_qa", "done"]) {
     const style = FLIIPA_STATE_STYLE[columnId];
     const state = matchState(states, columnId);
     if (!state || !style) continue;
@@ -886,9 +899,11 @@ function csvCell(value) {
 
 const STATE_GROUP = {
   backlog: "backlog",
-  todo: "unstarted",
+  blocked: "started",
   in_progress: "started",
   review: "started",
+  dev_qa: "started",
+  product_qa: "started",
   done: "completed",
 };
 
@@ -966,9 +981,11 @@ export async function migrateToPlane({
   const summary = { created: 0, updated: 0, failed: 0, removed: 0, errors: [] };
   const stateMap = {
     backlog: matchState(states, "backlog"),
-    todo: matchState(states, "todo"),
+    blocked: matchState(states, "blocked"),
     in_progress: matchState(states, "in_progress"),
     review: matchState(states, "review"),
+    dev_qa: matchState(states, "dev_qa"),
+    product_qa: matchState(states, "product_qa"),
     done: matchState(states, "done"),
   };
 
@@ -1013,7 +1030,7 @@ export async function migrateToPlane({
         payload = {
           name: item.title || "Sin título",
           description_html: buildTaskHtml(item, initiative),
-          state: (stateMap[item.status] || stateMap.todo)?.id,
+          state: (stateMap[item.status] || stateMap.backlog)?.id,
           target_date: item.dueDate || null,
           priority: item.blocked ? "high" : "none",
           labels: typeLabels[item.type] ? [typeLabels[item.type].id] : [],
@@ -1027,7 +1044,7 @@ export async function migrateToPlane({
         payload = {
           name: item.title || "Iniciativa",
           description_html: buildInitiativeHtml(item),
-          state: (stateMap[item.status] || stateMap.backlog || stateMap.todo)?.id,
+          state: (stateMap[item.status] || stateMap.backlog)?.id,
           target_date: item.dueDate || null,
           priority: "none",
           labels: typeLabels.Iniciativa ? [typeLabels.Iniciativa.id] : [],

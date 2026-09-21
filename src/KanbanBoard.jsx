@@ -52,11 +52,13 @@ const TASK_TYPES = {
 };
 
 const COLUMNS = [
-  { id: "backlog", label: "Pendiente", dot: "#C5CAD8" },
-  { id: "todo", label: "Por hacer", dot: "#8B8CFF" },
-  { id: "in_progress", label: "En progreso", dot: "#5B8CFF" },
-  { id: "review", label: "En revisión", dot: "#3EE0B4" },
-  { id: "done", label: "Hecho", dot: "#3EE0B4" },
+  { id: "backlog", label: "Backlog", dot: "#C5CAD8" },
+  { id: "blocked", label: "Blocked", dot: "#F07178" },
+  { id: "in_progress", label: "In development", dot: "#5B8CFF" },
+  { id: "review", label: "PR review", dot: "#B48EDE" },
+  { id: "dev_qa", label: "Dev QA", dot: "#F0C14B" },
+  { id: "product_qa", label: "Product QA", dot: "#8B8CFF" },
+  { id: "done", label: "Completado", dot: "#3EE0B4" },
 ];
 const BOARD_COLUMNS = COLUMNS.filter((c) => c.id !== "done");
 
@@ -409,7 +411,7 @@ const seedTasks = () =>
       title: "Definir flujo de checkout para vendedores",
       type: "Feature",
       assignee: "Mafe",
-      status: "todo",
+      status: "backlog",
       createdAt: Date.now() - 86400000 * 3,
       statusChangedAt: Date.now() - 86400000 * 20,
       dueDate: isoDaysAgo(-6),
@@ -464,7 +466,7 @@ const seedTasks = () =>
       title: "Notificaciones por email al cerrar una venta",
       type: "Feature",
       assignee: "Fran",
-      status: "todo",
+      status: "backlog",
       createdAt: Date.now() - 86400000 * 1.5,
       statusChangedAt: Date.now() - 86400000 * 3,
       dueDate: isoDaysAgo(-4),
@@ -609,6 +611,11 @@ export default function KanbanBoard() {
       } catch (e) {
         /* no había datos legacy */
       }
+    }
+    // Migración: la columna "Por hacer" (todo) se fusionó en "Backlog" al pasar
+    // a las columnas Backlog/Blocked/In development/PR review/Dev QA/Product QA/Completado.
+    if (loadedTasks) {
+      loadedTasks = loadedTasks.map((t) => (t && t.status === "todo" ? { ...t, status: "backlog" } : t));
     }
     const loadedInits = parseList(await window.storage.get(INITIATIVES_KEY, true).catch(() => null)) || [];
     const remoteDeletedTasks = parseDeleted(await window.storage.get(DELETED_TASKS_KEY, true).catch(() => null));
@@ -1445,7 +1452,7 @@ export default function KanbanBoard() {
                       font: "inherit",
                     }}
                   >
-                    <StatCard C={C} label="Cerradas" value={stats.cerradas} caption="en Hecho" color={C.accent} />
+                    <StatCard C={C} label="Cerradas" value={stats.cerradas} caption="en Completado" color={C.accent} />
                   </button>
                   <button
                     onClick={() => setOverdueOnly((v) => !v)}
@@ -1499,8 +1506,8 @@ export default function KanbanBoard() {
             </div>
             {stats.mode === "month" && !selectedInitiative && (
               <div style={{ fontSize: 13, color: C.textMuted, marginTop: -12, marginBottom: 18, lineHeight: 1.45 }}>
-                Pendiente {stats.backlog} · En progreso {stats.inProgress} · En revisión {stats.review} · Hecho {stats.cerradas}.
-                Las cerradas están en Hecho. Las vencidas (fecha pasada o sin actualizar desde el mes pasado) van a la columna Vencidas.
+                Backlog {stats.backlog} · In development {stats.inProgress} · PR review {stats.review} · Completado {stats.cerradas}.
+                Las cerradas están en Completado. Las vencidas (fecha pasada o sin actualizar desde el mes pasado) van a la columna Vencidas.
               </div>
             )}
 
@@ -1851,7 +1858,7 @@ export default function KanbanBoard() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 14px" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#3EE0B4", display: "inline-block" }} />
-                    Hecho
+                    Completado
                   </span>
                   <span
                     style={{
@@ -2258,7 +2265,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             {[
               { id: "iniciativas", label: "Iniciativas" },
               { id: "tablero", label: "Tablero" },
-              { id: "hecho", label: "Hecho" },
+              { id: "hecho", label: "Completado" },
               { id: "info", label: "Información" },
             ].map((tab) => (
               <button
@@ -2337,11 +2344,11 @@ const INFO_TOPICS = [
     id: "mapa",
     title: "Cómo se organiza",
     kicker: "El orden del tablero",
-    body: "El trabajo de Fliipa va de lo grande a lo concreto. Primero se define la iniciativa (el objetivo). Luego se crean las tareas (el trabajo de cada persona). Cada tarea se mueve por las columnas hasta Hecho.",
+    body: "El trabajo de Fliipa va de lo grande a lo concreto. Primero se define la iniciativa (el objetivo). Luego se crean las tareas (el trabajo de cada persona). Cada tarea se mueve por las columnas hasta Completado.",
     steps: [
       "Crea una iniciativa: el resultado que el equipo quiere lograr.",
       "Ábrela en el tablero y añade las tareas que hacen falta.",
-      "Mueve cada tarea de Pendiente a Hecho. El % de la iniciativa sube solo.",
+      "Mueve cada tarea de Backlog a Completado. El % de la iniciativa sube solo.",
     ],
   },
   {
@@ -2374,11 +2381,13 @@ const INFO_TOPICS = [
     kicker: "Dónde está cada cosa",
     body: "Las columnas son el flujo del trabajo. Arrastra la tarjeta o cámbiale el estado en el detalle.",
     steps: [
-      "Pendiente: idea o aún no se arranca.",
-      "Por hacer: ya está lista para que alguien la tome.",
-      "En progreso: se está haciendo ahora.",
-      "En revisión: alguien la está revisando o validando.",
-      "Hecho: terminada. Sale del tablero y queda en la pestaña Hecho.",
+      "Backlog: idea o aún no se arranca.",
+      "Blocked: no puede avanzar hasta resolver un impedimento.",
+      "In development: se está haciendo ahora.",
+      "PR review: el código está en revisión (pull request).",
+      "Dev QA: desarrollo prueba que el cambio funciona.",
+      "Product QA: producto valida que quedó como se esperaba.",
+      "Completado: terminada. Sale del tablero y queda en la pestaña Completado.",
     ],
   },
   {
@@ -2397,11 +2406,11 @@ const INFO_TOPICS = [
     id: "tablero",
     title: "Tablero",
     kicker: "La vista de columnas",
-    body: "El tablero es el Kanban: columnas con el trabajo que todavía está en curso. Arriba puedes filtrar por iniciativa, responsable, tipo o texto. Lo que ya terminaste no se queda aquí: pasa al archivo de Hecho.",
+    body: "El tablero es el Kanban: columnas con el trabajo que todavía está en curso. Arriba puedes filtrar por iniciativa, responsable, tipo o texto. Lo que ya terminaste no se queda aquí: pasa al archivo de Completado.",
     steps: [
       "Usa “Todas” para ver el trabajo completo del equipo.",
       "Filtra una iniciativa para concentrarte en un solo objetivo.",
-      "Vencida: pasó la fecha y aún no está en Hecho.",
+      "Vencida: pasó la fecha y aún no está en Completado.",
       "Bloqueada: alguien marcó que no puede avanzar (candado en la tarjeta).",
     ],
   },
@@ -2409,22 +2418,22 @@ const INFO_TOPICS = [
     id: "avance",
     title: "% de avance",
     kicker: "Cómo se mide el progreso",
-    body: "El porcentaje de una iniciativa no se adivina: es el promedio del estado de sus tareas. Pendiente vale 0 %, Por hacer 25 %, En progreso 50 %, En revisión 75 % y Hecho 100 %.",
+    body: "El porcentaje de una iniciativa no se adivina: es el promedio del estado de sus tareas. Backlog vale 0 % y Completado vale 100 %; las columnas intermedias (Blocked, In development, PR review, Dev QA, Product QA) reparten el resto en partes iguales.",
     steps: [
       "Si no hay tareas, puedes ajustar el % a mano con + y − en la fila.",
-      "Cuando hay tareas, el % sigue a las columnas. Mover a Hecho es lo que más sube.",
-      "Una iniciativa en Hecho no cierra sola las tareas: hay que moverlas también.",
+      "Cuando hay tareas, el % sigue a las columnas. Mover a Completado es lo que más sube.",
+      "Una iniciativa en Completado no cierra sola las tareas: hay que moverlas también.",
     ],
   },
   {
     id: "hecho",
-    title: "Hecho",
+    title: "Completado",
     kicker: "El archivo de lo terminado",
-    body: "Cuando una tarea llega a Hecho deja de ocupar el tablero. Queda en la pestaña Hecho, en una lista como la de iniciativas. Sigue contando 100 % en el avance de su iniciativa. Si hace falta, se puede reabrir.",
+    body: "Cuando una tarea llega a Completado deja de ocupar el tablero. Queda en la pestaña Completado, en una lista como la de iniciativas. Sigue contando 100 % en el avance de su iniciativa. Si hace falta, se puede reabrir.",
     steps: [
-      "Arrastra la tarjeta a la columna Hecho, o muévela desde el detalle.",
-      "Abre la pestaña Hecho para ver el archivo: título, iniciativa, responsable y fecha.",
-      "Reabrir la devuelve a En revisión. Eliminar la manda a Papelera.",
+      "Arrastra la tarjeta a la columna Completado, o muévela desde el detalle.",
+      "Abre la pestaña Completado para ver el archivo: título, iniciativa, responsable y fecha.",
+      "Reabrir la devuelve a PR review. Eliminar la manda a Papelera.",
     ],
   },
   {
@@ -2480,7 +2489,7 @@ function InfoView({ C, onGoInitiatives, onGoBoard, onGoDone }) {
           {[
             { title: "1. Iniciativa", text: "El resultado que el equipo quiere.", go: onGoInitiatives, label: "Ir a Iniciativas" },
             { title: "2. Tareas", text: "El trabajo de cada persona, con fecha y tipo.", go: onGoBoard, label: "Ir al Tablero" },
-            { title: "3. Columnas", text: "Pendiente → Por hacer → En progreso → En revisión. Lo hecho va al archivo.", go: onGoDone, label: "Ir a Hecho" },
+            { title: "3. Columnas", text: "Backlog → Blocked → In development → PR review → Dev QA → Product QA. Lo completado va al archivo.", go: onGoDone, label: "Ir a Completado" },
             { title: "4. Avance", text: "El % de la iniciativa sube al mover sus tareas." },
           ].map((card) => (
             <div
@@ -2642,7 +2651,7 @@ function InitiativesView({
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Iniciativas estratégicas de Fliipa</div>
           <div style={{ fontSize: 13, color: C.textMuted }}>
-            % de avance sube al mover las tareas de columna (Pendiente 0% → Por hacer 25% → En progreso 50% → En revisión 75% → Hecho 100%). Clic en una fila abre su tablero.
+            % de avance sube al mover las tareas de columna (Backlog 0% → Blocked → In development → PR review → Dev QA → Product QA → Completado 100%). Clic en una fila abre su tablero.
             {onOpenInfo && (
               <>
                 {" "}
@@ -2864,7 +2873,7 @@ function DoneArchiveView({ C, tasks, initiatives, onOpen, onReopen, onDelete }) 
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Archivo de tareas hechas</div>
           <div style={{ fontSize: 13, color: C.textMuted }}>
-            Al pasar una tarea a Hecho sale del tablero y queda aquí. Clic en una fila abre el detalle. Reabrir la vuelve a En revisión.
+            Al pasar una tarea a Completado sale del tablero y queda aquí. Clic en una fila abre el detalle. Reabrir la vuelve a PR review.
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -2905,7 +2914,7 @@ function DoneArchiveView({ C, tasks, initiatives, onOpen, onReopen, onDelete }) 
             marginBottom: 26,
           }}
         >
-          Aún no hay tareas en Hecho. Arrástralas a la columna Hecho del tablero y aparecerán aquí.
+          Aún no hay tareas en Completado. Arrástralas a la columna Completado del tablero y aparecerán aquí.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 26 }} className="fliipa-init-list">
@@ -2999,7 +3008,7 @@ function DoneTaskRow({ C, task, initiative, onOpen, onReopen, onDelete }) {
             onReopen && onReopen();
           }}
           aria-label="Reabrir tarea"
-          title="Reabrir en En revisión"
+          title="Reabrir en PR review"
           style={{
             background: hover ? C.surfaceRaised : "none",
             border: "none",
@@ -3068,7 +3077,7 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen, onE
       </div>
       <div>
         <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 4 }}>
-          {initiative.progress || 0}% · {initiative.closed || 0} de {initiative.taskCount || 0} en Hecho
+          {initiative.progress || 0}% · {initiative.closed || 0} de {initiative.taskCount || 0} en Completado
         </div>
         <div style={{ height: 6, background: C.surfaceRaised, borderRadius: 3, overflow: "hidden" }}>
           <div style={{ width: `${initiative.progress || 0}%`, height: "100%", background: color }} />
