@@ -3806,7 +3806,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
           style={{ ...primary, width: "100%", marginTop: 16, padding: "10px 14px", opacity: saving ? 0.7 : 1 }}
           disabled={saving}
         >
-          {saving ? "Guardando…" : saveNotice ? "Nota guardada" : "Guardar notas"}
+          {saving ? "Guardando…" : "Guardar notas"}
         </button>
         {saveNotice && (
           <div
@@ -3823,7 +3823,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
               textAlign: "center",
             }}
           >
-            Nota guardada
+            Tu nota ha sido guardada con éxito
           </div>
         )}
 
@@ -5270,7 +5270,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
           style={{ ...primary, width: "100%", marginTop: 16, padding: "10px 14px", opacity: saving ? 0.7 : 1 }}
           disabled={saving}
         >
-          {saving ? "Guardando…" : saveNotice ? "Nota guardada" : "Guardar notas"}
+          {saving ? "Guardando…" : "Guardar notas"}
         </button>
         {saveNotice && (
           <div
@@ -5287,7 +5287,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
               textAlign: "center",
             }}
           >
-            Nota guardada
+            Tu nota ha sido guardada con éxito
           </div>
         )}
 
