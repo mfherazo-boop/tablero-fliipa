@@ -605,6 +605,23 @@ function formatDoneDate(ts) {
   });
 }
 
+// Historial de versiones del campo "Notas" (tareas e iniciativas). Cada vez
+// que se guarda un cambio real en las notas, se agrega al principio lo que
+// decían justo antes de esa edición, para poder ver versiones anteriores.
+// No sabemos quién hizo el cambio (el tablero no tiene usuarios con sesión
+// propia), así que solo queda registrado el cuándo.
+const NOTE_HISTORY_LIMIT = 20;
+
+function pushNoteHistory(history, previousText) {
+  const entry = { text: (previousText || "").trim(), at: Date.now() };
+  return [entry, ...(Array.isArray(history) ? history : [])].slice(0, NOTE_HISTORY_LIMIT);
+}
+
+function truncateText(text, max) {
+  if (!text) return "";
+  return text.length > max ? text.slice(0, max).trimEnd() + "…" : text;
+}
+
 function formatUpdated(ts) {
   const d = new Date(ts);
   const datePart = d.toLocaleDateString("es-CO", {
@@ -3634,12 +3651,15 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
     if (saving) return;
     const finalOwner = owner === "__none__" ? "" : owner;
     setSaving(true);
+    const trimmedNotes = notes.trim();
+    const notesChanged = trimmedNotes !== (initiative.notes || "");
     onSave({
       title: title.trim() || initiative.title,
       owner: finalOwner,
       status,
       dueDate: dueDate || null,
-      notes: notes.trim(),
+      notes: trimmedNotes,
+      notesHistory: notesChanged ? pushNoteHistory(initiative.notesHistory, initiative.notes) : initiative.notesHistory,
     });
     setSaving(false);
     flashSaved();
@@ -3652,6 +3672,12 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
     history.push({ t: initiative.statusChangedAt, text: `Estado actualizado a ${col}` });
   }
   if (initiative.planeMigratedAt) history.push({ t: initiative.planeMigratedAt, text: "Migrada a Plane" });
+  (initiative.notesHistory || []).forEach((entry) => {
+    history.push({
+      t: entry.at,
+      text: entry.text ? `Nota editada — antes decía: "${truncateText(entry.text, 140)}"` : "Nota editada — antes estaba vacía",
+    });
+  });
   history.sort((a, b) => b.t - a.t);
 
   const label = labelStyle(C);
@@ -4937,9 +4963,12 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
     try {
       const uploaded = [];
       for (const item of pending) uploaded.push(await uploadPending(item));
+      const trimmedNotes = description.trim();
+      const notesChanged = trimmedNotes !== (task.description || "");
       onSave({
         title: title.trim() || task.title,
-        description: description.trim(),
+        description: trimmedNotes,
+        notesHistory: notesChanged ? pushNoteHistory(task.notesHistory, task.description) : task.notesHistory,
         initiativeId: initiativeId || null,
         attachments: [...attachments, ...uploaded],
         type,
@@ -4966,6 +4995,12 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
     history.push({ t: task.statusChangedAt, text: `Estado actualizado a ${col}` });
   }
   if (task.planeMigratedAt) history.push({ t: task.planeMigratedAt, text: "Migrada a Plane" });
+  (task.notesHistory || []).forEach((entry) => {
+    history.push({
+      t: entry.at,
+      text: entry.text ? `Nota editada — antes decía: "${truncateText(entry.text, 140)}"` : "Nota editada — antes estaba vacía",
+    });
+  });
   history.sort((a, b) => b.t - a.t);
 
   const label = labelStyle(C);
