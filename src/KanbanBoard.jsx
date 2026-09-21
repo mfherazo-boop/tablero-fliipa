@@ -563,6 +563,7 @@ export default function KanbanBoard() {
   const [unassignedOnly, setUnassignedOnly] = useState(false);
   const [lastMonthOnly, setLastMonthOnly] = useState(false);
   const [initiativeFilter, setInitiativeFilter] = useState(null);
+  const [boardFocusMode, setBoardFocusMode] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -1054,6 +1055,39 @@ export default function KanbanBoard() {
     if (next) moveTask(id, next.id);
   }
 
+  useEffect(() => {
+    function handleFullscreenExit() {
+      if (!(document.fullscreenElement || document.webkitFullscreenElement)) {
+        setBoardFocusMode(false);
+      }
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenExit);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenExit);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenExit);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenExit);
+    };
+  }, []);
+
+  function toggleBoardFocus() {
+    setBoardFocusMode((prev) => {
+      const next = !prev;
+      try {
+        if (next) {
+          const el = document.documentElement;
+          if (el.requestFullscreen) el.requestFullscreen();
+          else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+        } else if (document.fullscreenElement || document.webkitFullscreenElement) {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
+      } catch (e) {
+        // Si el navegador bloquea la pantalla completa, el modo enfocado sigue funcionando igual.
+      }
+      return next;
+    });
+  }
+
   function addTask(task) {
     const now = Date.now();
     setTasks((prev) => [{ ...task, id: "t" + now, createdAt: now, statusChangedAt: now, updatedAt: now }, ...prev]);
@@ -1235,6 +1269,8 @@ export default function KanbanBoard() {
           * { transition: none !important; animation: none !important; }
         }
         .fliipa-page { padding: 22px 24px 40px; min-width: 0; }
+        .fliipa-page-focus { padding: 12px !important; height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; }
+        .fliipa-page-focus .fliipa-board { flex: 1 1 auto; }
         .fliipa-info-grid { display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: start; }
         .fliipa-info-nav { position: sticky; top: 12px; }
         .fliipa-info-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -1252,6 +1288,14 @@ export default function KanbanBoard() {
         .fliipa-col {
           flex: 1 1 0 !important;
           min-width: 210px !important;
+        }
+        .fliipa-board-focus {
+          overflow-x: hidden !important;
+          height: 100%;
+        }
+        .fliipa-board-focus .fliipa-col {
+          min-width: 0 !important;
+          overflow-y: auto;
         }
         .fliipa-init-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         .fliipa-modal-pad { padding: 20px; }
@@ -1369,22 +1413,49 @@ export default function KanbanBoard() {
         }
       `}</style>
 
-      <TopBar
-        C={C}
-        dark={dark}
-        onToggleDark={() => setDark((d) => !d)}
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        lastUpdated={lastUpdated}
-        syncStatus={saving ? "saving" : !error ? "ok" : error === "no-storage" ? "local" : "error"}
-        onOpenExport={() => setExportOpen(true)}
-        onOpenImport={() => setImportOpen(true)}
-        onOpenPlane={() => setPlaneOpen(true)}
-        onOpenTrash={() => setTrashOpen(true)}
-        trashCount={trashList(deletedTaskIds).length + trashList(deletedInitIds).length}
-      />
+      {!boardFocusMode && (
+        <TopBar
+          C={C}
+          dark={dark}
+          onToggleDark={() => setDark((d) => !d)}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          lastUpdated={lastUpdated}
+          syncStatus={saving ? "saving" : !error ? "ok" : error === "no-storage" ? "local" : "error"}
+          onOpenExport={() => setExportOpen(true)}
+          onOpenImport={() => setImportOpen(true)}
+          onOpenPlane={() => setPlaneOpen(true)}
+          onOpenTrash={() => setTrashOpen(true)}
+          trashCount={trashList(deletedTaskIds).length + trashList(deletedInitIds).length}
+        />
+      )}
 
-      <div className="fliipa-page">
+      {boardFocusMode && (
+        <button
+          onClick={toggleBoardFocus}
+          style={{
+            position: "fixed",
+            top: 12,
+            right: 12,
+            zIndex: 200,
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            color: C.text,
+            borderRadius: 8,
+            padding: "6px 12px",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: 700,
+            boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
+          }}
+          aria-label="Salir del tablero completo"
+          title="Salir del tablero completo (Esc)"
+        >
+          ✕ Salir
+        </button>
+      )}
+
+      <div className={`fliipa-page${boardFocusMode ? " fliipa-page-focus" : ""}`}>
         {activeTab === "info" ? (
           <InfoView
             C={C}
@@ -1422,6 +1493,8 @@ export default function KanbanBoard() {
           />
         ) : (
           <>
+            {!boardFocusMode && (
+              <>
             {/* Métricas */}
             <div className="fliipa-stats">
               {stats.mode === "month" ? (
@@ -1657,6 +1730,25 @@ export default function KanbanBoard() {
                   )}
                 </div>
                 <button
+                  onClick={toggleBoardFocus}
+                  style={{
+                    background: "none",
+                    border: `1px solid ${C.border}`,
+                    color: C.textMuted,
+                    borderRadius: 20,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                  }}
+                  aria-label="Ver el tablero completo, sin filtros ni métricas"
+                  title="Amplía el tablero a toda la pantalla, mostrando solo las columnas"
+                >
+                  ⤢ Ampliar tablero
+                </button>
+                <button
                   className="fliipa-new-task"
                   onClick={() => setModalOpen(true)}
                   style={{
@@ -1692,6 +1784,8 @@ export default function KanbanBoard() {
                 Esta iniciativa no tiene tareas todavía. Pulsa{" "}
                 <strong style={{ color: C.text }}>Nueva tarea</strong> y se asignará aquí.
               </div>
+            )}
+              </>
             )}
 
             {error && error !== "no-storage" && (
@@ -1761,7 +1855,7 @@ export default function KanbanBoard() {
             )}
 
             {/* Tablero */}
-            <div className="fliipa-board">
+            <div className={`fliipa-board${boardFocusMode ? " fliipa-board-focus" : ""}`}>
               {BOARD_COLUMNS.map((col, colIdx) => (
                 <div
                   className="fliipa-col"
