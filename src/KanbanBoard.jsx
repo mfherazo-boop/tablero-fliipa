@@ -169,6 +169,51 @@ const TASKS_KEY_LEGACY = "flippa-kanban:tasks";
 const THEME_KEY_LEGACY = "flippa-kanban:theme";
 const POLL_MS = 4000;
 
+// Respaldo local inmediato (sin debounce ni espera de red). El guardado
+// "de verdad" hacia el tablero compartido tarda un poco (espera 400ms y
+// luego hace la llamada a la API), así que si la persona recarga la
+// página justo después de crear/editar algo (por ejemplo con Ctrl+Shift+R)
+// ese guardado remoto puede quedar a mitad de camino y perderse. Estas
+// claves guardan una copia instantánea en localStorage en cuanto cambia
+// el estado, para poder recuperarla al cargar de nuevo aunque el guardado
+// remoto no haya alcanzado a completarse.
+const BACKUP_TASKS_KEY = "fliipa-kanban:backup:tasks";
+const BACKUP_INITIATIVES_KEY = "fliipa-kanban:backup:initiatives";
+const BACKUP_MEMBERS_KEY = "fliipa-kanban:backup:members";
+const BACKUP_DELETED_TASKS_KEY = "fliipa-kanban:backup:deleted-tasks";
+const BACKUP_DELETED_INIT_KEY = "fliipa-kanban:backup:deleted-initiatives";
+const BACKUP_DELETED_MEMBERS_KEY = "fliipa-kanban:backup:deleted-members";
+
+function readBackupList(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function readBackupMap(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeBackup(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    /* si el navegador bloquea localStorage (modo privado, cuota llena, etc.) seguimos igual */
+  }
+}
+
 // Reintentos con backoff para tolerar errores transitorios del backend de storage
 const SAVE_RETRY_DELAYS_MS = [1000, 3000, 6000, 12000];
 
@@ -679,10 +724,27 @@ export default function KanbanBoard() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Respaldo local guardado al instante (ver BACKUP_*_KEY más arriba):
+      // recupera cualquier cambio que se haya quedado a mitad de camino de
+      // guardarse en el tablero compartido (por ejemplo, por recargar la
+      // página justo después de crear/editar algo).
+      const backupTasks = readBackupList(BACKUP_TASKS_KEY);
+      const backupInits = readBackupList(BACKUP_INITIATIVES_KEY);
+      const backupMembers = readBackupList(BACKUP_MEMBERS_KEY);
+      const backupDeletedTasks = readBackupMap(BACKUP_DELETED_TASKS_KEY);
+      const backupDeletedInits = readBackupMap(BACKUP_DELETED_INIT_KEY);
+      const backupDeletedMembers = readBackupMap(BACKUP_DELETED_MEMBERS_KEY);
+
       if (!hasStorage) {
-        setTasks(seedTasks());
-        setInitiatives([]);
-        setMembers(defaultMembers());
+        const deletedTaskIds = backupDeletedTasks;
+        const deletedInitIds = backupDeletedInits;
+        const deletedMemberIds = backupDeletedMembers;
+        setDeletedTaskIds(deletedTaskIds);
+        setDeletedInitIds(deletedInitIds);
+        setDeletedMemberIds(deletedMemberIds);
+        setTasks(mergeRecords(backupTasks, seedTasks(), deletedTaskIds));
+        setInitiatives(mergeRecords(backupInits, [], deletedInitIds));
+        setMembers(mergeRecords(backupMembers, defaultMembers(), deletedMemberIds));
         setLoaded(true);
         return;
       }
@@ -694,12 +756,30 @@ export default function KanbanBoard() {
         const initialInits = remote.initiatives || [];
         const hadRemoteMembers = remote.members && remote.members.length > 0;
         const initialMembers = hadRemoteMembers ? remote.members : defaultMembers();
-        setDeletedTaskIds(remote.deletedTaskIds);
-        setDeletedInitIds(remote.deletedInitIds);
-        setDeletedMemberIds(remote.deletedMemberIds);
-        setTasks(initialTasks.filter((t) => !remote.deletedTaskIds[t.id]));
-        setInitiatives(initialInits.filter((i) => !remote.deletedInitIds[i.id]));
-        setMembers(initialMembers.filter((m) => !remote.deletedMemberIds[m.id]));
+
+        // Unimos las marcas de eliminado (si algo se borró localmente justo
+        // antes de recargar, ese borrado también se conserva) y fusionamos
+        // cada lista quedándonos, registro por registro, con la versión más
+        // reciente entre el respaldo local y lo que ya había en el tablero
+        // compartido.
+        const deletedTaskIds = { ...remote.deletedTaskIds, ...backupDeletedTasks };
+        const deletedInitIds = { ...remote.deletedInitIds, ...backupDeletedInits };
+        const deletedMemberIds = { ...remote.deletedMemberIds, ...backupDeletedMembers };
+        const mergedTasks = mergeRecords(backupTasks, initialTasks, deletedTaskIds);
+        const mergedInits = mergeRecords(backupInits, initialInits, deletedInitIds);
+        const mergedMembers = mergeRecords(backupMembers, initialMembers, deletedMemberIds);
+
+        setDeletedTaskIds(deletedTaskIds);
+        setDeletedInitIds(deletedInitIds);
+        setDeletedMemberIds(deletedMemberIds);
+        setTasks(mergedTasks);
+        setInitiatives(mergedInits);
+        setMembers(mergedMembers);
+        // Ojo: dejamos las referencias "last*" apuntando a lo que ya estaba
+        // en el tablero compartido (no a la versión fusionada). Así, si el
+        // respaldo local trajo algo que el tablero compartido todavía no
+        // tenía, el efecto de guardado detecta la diferencia y lo vuelve a
+        // sincronizar automáticamente.
         lastTasksRef.current = hadRemoteTasks ? JSON.stringify(initialTasks) : "";
         lastInitsRef.current = JSON.stringify(initialInits);
         lastMembersRef.current = hadRemoteMembers ? JSON.stringify(initialMembers) : "";
@@ -708,8 +788,15 @@ export default function KanbanBoard() {
         lastDeletedMembersRef.current = JSON.stringify(remote.deletedMemberIds);
       } catch (e) {
         if (!cancelled) {
-          setTasks(seedTasks());
-          setMembers(defaultMembers());
+          const deletedTaskIds = backupDeletedTasks;
+          const deletedInitIds = backupDeletedInits;
+          const deletedMemberIds = backupDeletedMembers;
+          setDeletedTaskIds(deletedTaskIds);
+          setDeletedInitIds(deletedInitIds);
+          setDeletedMemberIds(deletedMemberIds);
+          setTasks(mergeRecords(backupTasks, seedTasks(), deletedTaskIds));
+          setInitiatives(mergeRecords(backupInits, [], deletedInitIds));
+          setMembers(mergeRecords(backupMembers, defaultMembers(), deletedMemberIds));
         }
       } finally {
         if (!cancelled) setLoaded(true);
@@ -896,6 +983,38 @@ export default function KanbanBoard() {
     if (snapshot === lastDeletedMembersRef.current) return;
     lastDeletedMembersRef.current = snapshot;
     setWithRetry(DELETED_MEMBERS_KEY, snapshot, true);
+  }, [deletedMemberIds, loaded]);
+
+  // ---- respaldo local inmediato (sin debounce, sin esperar a la red) ----
+  // El guardado de arriba hacia el tablero compartido tarda un poco (400ms
+  // de espera más el viaje de red), así que si se recarga la página justo
+  // después de crear/editar algo, ese guardado puede quedar a mitad de
+  // camino y perderse. Estos efectos escriben de inmediato una copia en
+  // localStorage apenas cambia el estado, para poder recuperarla al volver
+  // a cargar (ver la fusión con BACKUP_*_KEY en el efecto de carga inicial).
+  useEffect(() => {
+    if (!loaded) return;
+    writeBackup(BACKUP_TASKS_KEY, tasks);
+  }, [tasks, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    writeBackup(BACKUP_INITIATIVES_KEY, initiatives);
+  }, [initiatives, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    writeBackup(BACKUP_MEMBERS_KEY, members);
+  }, [members, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    writeBackup(BACKUP_DELETED_TASKS_KEY, deletedTaskIds);
+  }, [deletedTaskIds, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    writeBackup(BACKUP_DELETED_INIT_KEY, deletedInitIds);
+  }, [deletedInitIds, loaded]);
+  useEffect(() => {
+    if (!loaded) return;
+    writeBackup(BACKUP_DELETED_MEMBERS_KEY, deletedMemberIds);
   }, [deletedMemberIds, loaded]);
 
   // ---- reintento automático en segundo plano si el guardado de iniciativas sigue fallando ----
