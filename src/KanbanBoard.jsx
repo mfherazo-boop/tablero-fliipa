@@ -2075,6 +2075,35 @@ async function copyShareLink(title) {
 function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenPlane, onOpenTrash, trashCount }) {
   const [shareStatus, setShareStatus] = useState(null);
   const shareTimerRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  async function toggleFullscreen() {
+    try {
+      const active = document.fullscreenElement || document.webkitFullscreenElement;
+      if (active) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+      } else {
+        const el = document.documentElement;
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+      }
+    } catch (e) {
+      // Algunos navegadores bloquean el pedido si no viene de una interacción directa; se ignora.
+    }
+  }
 
   async function handleShare() {
     const result = await copyShareLink("Fliipa: Tablero de tareas");
@@ -2170,6 +2199,23 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             title="Tareas e iniciativas eliminadas. Puedes restaurarlas o borrarlas para siempre."
           >
             Papelera{trashCount ? ` (${trashCount})` : ""}
+          </button>
+          <button
+            onClick={toggleFullscreen}
+            style={{
+              background: "none",
+              border: `1px solid ${C.border}`,
+              color: C.textMuted,
+              borderRadius: 6,
+              width: 28,
+              height: 28,
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+            aria-label={isFullscreen ? "Salir de pantalla completa" : "Ver el tablero completo en pantalla completa"}
+            title={isFullscreen ? "Salir de pantalla completa" : "Abrir el tablero completo en pantalla completa"}
+          >
+            {isFullscreen ? "⤡" : "⤢"}
           </button>
           <button
             onClick={onOpenExport}
