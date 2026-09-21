@@ -151,8 +151,10 @@ function weightedInitiativeProgress(related, fallback) {
 const TASKS_KEY = "fliipa-kanban:tasks";
 const THEME_KEY = "fliipa-kanban:theme";
 const INITIATIVES_KEY = "fliipa-kanban:initiatives";
+const MEMBERS_KEY = "fliipa-kanban:members";
 const DELETED_TASKS_KEY = "fliipa-kanban:deleted-tasks";
 const DELETED_INIT_KEY = "fliipa-kanban:deleted-initiatives";
+const DELETED_MEMBERS_KEY = "fliipa-kanban:deleted-members";
 // Claves antiguas (nombre mal escrito) — se usan solo para migrar datos ya guardados
 const TASKS_KEY_LEGACY = "flippa-kanban:tasks";
 const THEME_KEY_LEGACY = "flippa-kanban:theme";
@@ -225,6 +227,20 @@ function parseDeleted(result) {
   } catch (e) {
     return {};
   }
+}
+
+// Lista inicial de personas asignables (se usa solo si todavía no hay
+// ninguna guardada). A partir de acá, la lista vive en `members` y se
+// administra desde "Usuarios" — así no quedan responsables duplicados
+// por escribirlos distinto en cada tarea.
+function defaultMembers() {
+  const now = Date.now();
+  return ROSTER.map((name, i) => ({
+    id: "m-" + foldName(name).replace(/[^a-z0-9]+/g, "-"),
+    name,
+    createdAt: now + i,
+    updatedAt: now + i,
+  }));
 }
 
 function trashEntry(item) {
@@ -573,8 +589,11 @@ export default function KanbanBoard() {
   const [openInitId, setOpenInitId] = useState(null);
   const [planeOpen, setPlaneOpen] = useState(false);
   const [initiatives, setInitiatives] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [deletedTaskIds, setDeletedTaskIds] = useState({});
   const [deletedInitIds, setDeletedInitIds] = useState({});
+  const [deletedMemberIds, setDeletedMemberIds] = useState({});
   const [initModalOpen, setInitModalOpen] = useState(false);
   const [savingInit, setSavingInit] = useState(false);
   const [initError, setInitError] = useState(null);
@@ -586,10 +605,14 @@ export default function KanbanBoard() {
   const [activeTab, setActiveTab] = useState("tablero");
   const saveTimer = useRef(null);
   const saveTokenRef = useRef(0);
+  const memberSaveTimer = useRef(null);
+  const memberSaveTokenRef = useRef(0);
   const lastTasksRef = useRef("");
   const lastInitsRef = useRef("");
+  const lastMembersRef = useRef("");
   const lastDeletedTasksRef = useRef("");
   const lastDeletedInitsRef = useRef("");
+  const lastDeletedMembersRef = useRef("");
   const applyingRemote = useRef(false);
 
   const C = useMemo(() => getColors(dark), [dark]);
@@ -619,8 +642,10 @@ export default function KanbanBoard() {
       loadedTasks = loadedTasks.map((t) => (t && t.status === "todo" ? { ...t, status: "backlog" } : t));
     }
     const loadedInits = parseList(await window.storage.get(INITIATIVES_KEY, true).catch(() => null)) || [];
+    const loadedMembers = parseList(await window.storage.get(MEMBERS_KEY, true).catch(() => null));
     const remoteDeletedTasks = parseDeleted(await window.storage.get(DELETED_TASKS_KEY, true).catch(() => null));
     const remoteDeletedInits = parseDeleted(await window.storage.get(DELETED_INIT_KEY, true).catch(() => null));
+    const remoteDeletedMembers = parseDeleted(await window.storage.get(DELETED_MEMBERS_KEY, true).catch(() => null));
 
     if (isInitial) {
       try {
@@ -634,8 +659,10 @@ export default function KanbanBoard() {
     return {
       tasks: loadedTasks,
       initiatives: loadedInits,
+      members: loadedMembers,
       deletedTaskIds: remoteDeletedTasks,
       deletedInitIds: remoteDeletedInits,
+      deletedMemberIds: remoteDeletedMembers,
     };
   }
 
@@ -646,6 +673,7 @@ export default function KanbanBoard() {
       if (!hasStorage) {
         setTasks(seedTasks());
         setInitiatives([]);
+        setMembers(defaultMembers());
         setLoaded(true);
         return;
       }
@@ -655,16 +683,25 @@ export default function KanbanBoard() {
         const hadRemoteTasks = remote.tasks && remote.tasks.length > 0;
         const initialTasks = hadRemoteTasks ? remote.tasks : seedTasks();
         const initialInits = remote.initiatives || [];
+        const hadRemoteMembers = remote.members && remote.members.length > 0;
+        const initialMembers = hadRemoteMembers ? remote.members : defaultMembers();
         setDeletedTaskIds(remote.deletedTaskIds);
         setDeletedInitIds(remote.deletedInitIds);
+        setDeletedMemberIds(remote.deletedMemberIds);
         setTasks(initialTasks.filter((t) => !remote.deletedTaskIds[t.id]));
         setInitiatives(initialInits.filter((i) => !remote.deletedInitIds[i.id]));
+        setMembers(initialMembers.filter((m) => !remote.deletedMemberIds[m.id]));
         lastTasksRef.current = hadRemoteTasks ? JSON.stringify(initialTasks) : "";
         lastInitsRef.current = JSON.stringify(initialInits);
+        lastMembersRef.current = hadRemoteMembers ? JSON.stringify(initialMembers) : "";
         lastDeletedTasksRef.current = JSON.stringify(remote.deletedTaskIds);
         lastDeletedInitsRef.current = JSON.stringify(remote.deletedInitIds);
+        lastDeletedMembersRef.current = JSON.stringify(remote.deletedMemberIds);
       } catch (e) {
-        if (!cancelled) setTasks(seedTasks());
+        if (!cancelled) {
+          setTasks(seedTasks());
+          setMembers(defaultMembers());
+        }
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -693,6 +730,17 @@ export default function KanbanBoard() {
             const pending = JSON.stringify(prev) !== lastInitsRef.current;
             const merged = mergeRecords(prev, remote.initiatives, deleted);
             if (!pending) lastInitsRef.current = JSON.stringify(merged);
+            return merged;
+          });
+          return deleted;
+        });
+        setDeletedMemberIds((prevDeleted) => {
+          const deleted = { ...remote.deletedMemberIds, ...prevDeleted };
+          lastDeletedMembersRef.current = JSON.stringify(deleted);
+          setMembers((prev) => {
+            const pending = JSON.stringify(prev) !== lastMembersRef.current;
+            const merged = mergeRecords(prev, remote.members, deleted);
+            if (!pending) lastMembersRef.current = JSON.stringify(merged);
             return merged;
           });
           return deleted;
@@ -814,6 +862,33 @@ export default function KanbanBoard() {
     setWithRetry(DELETED_INIT_KEY, snapshot, true);
   }, [deletedInitIds, loaded]);
 
+  // ---- persist usuarios (debounced, con reintentos) ----
+  useEffect(() => {
+    if (!loaded || !hasStorage || applyingRemote.current) return;
+    const snapshot = JSON.stringify(members);
+    if (snapshot === lastMembersRef.current) return;
+    if (memberSaveTimer.current) clearTimeout(memberSaveTimer.current);
+    const myToken = ++memberSaveTokenRef.current;
+    memberSaveTimer.current = setTimeout(async () => {
+      const { ok, error: err } = await setWithRetry(MEMBERS_KEY, snapshot, true);
+      if (myToken !== memberSaveTokenRef.current) return;
+      if (ok) {
+        lastMembersRef.current = snapshot;
+      } else {
+        console.error("window.storage.set (usuarios) falló tras reintentos", err);
+      }
+    }, 400);
+    return () => clearTimeout(memberSaveTimer.current);
+  }, [members, loaded]);
+
+  useEffect(() => {
+    if (!loaded || !hasStorage || applyingRemote.current) return;
+    const snapshot = JSON.stringify(deletedMemberIds);
+    if (snapshot === lastDeletedMembersRef.current) return;
+    lastDeletedMembersRef.current = snapshot;
+    setWithRetry(DELETED_MEMBERS_KEY, snapshot, true);
+  }, [deletedMemberIds, loaded]);
+
   // ---- reintento automático en segundo plano si el guardado de iniciativas sigue fallando ----
   useEffect(() => {
     if (!initError || initError === "no-storage") return;
@@ -880,6 +955,71 @@ export default function KanbanBoard() {
     setInitiatives((prev) => [...prev]);
   }
 
+  // ---- gestión de usuarios (sin login: solo evita nombres duplicados) ----
+  function addMember(rawName) {
+    const name = String(rawName || "").trim();
+    if (!name) return { ok: false, error: "El nombre no puede estar vacío." };
+    const needle = foldName(name);
+    if (members.some((m) => foldName(m.name) === needle)) {
+      return { ok: false, error: `Ya existe un usuario llamado "${name}".` };
+    }
+    const now = Date.now();
+    const member = {
+      id: "m" + now.toString(36) + Math.random().toString(36).slice(2, 6),
+      name,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setMembers((prev) => [...prev, member]);
+    return { ok: true, member };
+  }
+
+  function renameMember(id, rawName) {
+    const name = String(rawName || "").trim();
+    if (!name) return { ok: false, error: "El nombre no puede estar vacío." };
+    const current = members.find((m) => m.id === id);
+    if (!current) return { ok: false, error: "Ese usuario ya no existe." };
+    const needle = foldName(name);
+    const clash = members.some((m) => m.id !== id && foldName(m.name) === needle);
+    if (clash) return { ok: false, error: `Ya existe un usuario llamado "${name}".` };
+    const oldName = current.name;
+    if (oldName === name) return { ok: true };
+    const now = Date.now();
+    setMembers((prev) => prev.map((m) => (m.id === id ? { ...m, name, updatedAt: now } : m)));
+    if (oldName) {
+      setTasks((prev) => prev.map((t) => (t.assignee === oldName ? { ...t, assignee: name, updatedAt: now } : t)));
+      setInitiatives((prev) => prev.map((i) => (i.owner === oldName ? { ...i, owner: name, updatedAt: now } : i)));
+      setAssigneeFilter((prev) => (prev === oldName ? name : prev));
+    }
+    return { ok: true };
+  }
+
+  function removeMember(id) {
+    const current = members.find((m) => m.id === id);
+    if (!current) return;
+    const name = current.name;
+    setMembers((prev) => prev.filter((m) => m.id !== id));
+    setDeletedMemberIds((prev) => ({ ...prev, [id]: trashEntry(current) }));
+    if (name) {
+      const now = Date.now();
+      setTasks((prev) => prev.map((t) => (t.assignee === name ? { ...t, assignee: "", updatedAt: now } : t)));
+      setInitiatives((prev) => prev.map((i) => (i.owner === name ? { ...i, owner: "", updatedAt: now } : i)));
+      setAssigneeFilter((prev) => (prev === name ? "Todos" : prev));
+    }
+  }
+
+  // Un "nombre suelto" es un responsable que aparece en tareas/iniciativas
+  // pero no está en la lista de usuarios (p. ej. quedó de antes de tener
+  // esta gestión, o alguien lo escribió distinto). Fusionarlo lo deja como
+  // el nombre canónico de un usuario ya existente.
+  function mergeLegacyName(oldName, targetName) {
+    if (!oldName || !targetName || oldName === targetName) return;
+    const now = Date.now();
+    setTasks((prev) => prev.map((t) => (t.assignee === oldName ? { ...t, assignee: targetName, updatedAt: now } : t)));
+    setInitiatives((prev) => prev.map((i) => (i.owner === oldName ? { ...i, owner: targetName, updatedAt: now } : i)));
+    setAssigneeFilter((prev) => (prev === oldName ? targetName : prev));
+  }
+
   function applyImportedSnapshot(parsed) {
     if (!parsed || typeof parsed !== "object") throw new Error("Formato inválido");
     let incomingTasks = Array.isArray(parsed.tasks) ? parsed.tasks : null;
@@ -915,10 +1055,34 @@ export default function KanbanBoard() {
   const monthExportTasks = useMemo(() => tasks.filter(isLastMonthExport), [tasks]);
   const boardPool = lastMonthOnly ? monthExportTasks : tasks;
 
+  // Lista canónica de personas (gestionada en "Usuarios"). Los formularios de
+  // asignar solo ofrecen estos nombres para que no se creen variantes nuevas.
+  const memberNames = useMemo(() => members.map((m) => m.name), [members]);
+
+  // El filtro del tablero además muestra cualquier nombre suelto que ya
+  // exista en datos viejos, para no perder de vista tareas ya asignadas así.
   const assignees = useMemo(() => {
-    const set = new Set([...ROSTER, ...boardPool.map((t) => t.assignee).filter(Boolean)]);
+    const set = new Set([...memberNames, ...boardPool.map((t) => t.assignee).filter(Boolean)]);
     return ["Todos", ...Array.from(set).sort()];
-  }, [boardPool]);
+  }, [memberNames, boardPool]);
+
+  const legacyAssigneeNames = useMemo(() => {
+    const known = new Set(memberNames.map((n) => foldName(n)));
+    const counts = new Map();
+    tasks.forEach((t) => {
+      if (t.assignee && !known.has(foldName(t.assignee))) {
+        counts.set(t.assignee, (counts.get(t.assignee) || 0) + 1);
+      }
+    });
+    initiatives.forEach((i) => {
+      if (i.owner && !known.has(foldName(i.owner))) {
+        counts.set(i.owner, (counts.get(i.owner) || 0) + 1);
+      }
+    });
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [tasks, initiatives, memberNames]);
 
   const scopedTasks = useMemo(() => {
     if (!initiativeFilter) return boardPool;
@@ -1427,6 +1591,7 @@ export default function KanbanBoard() {
           onOpenPlane={() => setPlaneOpen(true)}
           onOpenTrash={() => setTrashOpen(true)}
           trashCount={trashList(deletedTaskIds).length + trashList(deletedInitIds).length}
+          onOpenMembers={() => setMembersOpen(true)}
         />
       )}
 
@@ -2006,7 +2171,7 @@ export default function KanbanBoard() {
       {modalOpen && (
         <AddTaskModal
           C={C}
-          assignees={assignees.filter((a) => a !== "Todos")}
+          assignees={memberNames}
           initiatives={initiatives}
           defaultInitiativeId={initiativeFilter}
           onClose={() => setModalOpen(false)}
@@ -2017,7 +2182,7 @@ export default function KanbanBoard() {
       {initModalOpen && (
         <AddInitiativeModal
           C={C}
-          assignees={ROSTER}
+          assignees={memberNames}
           onClose={() => setInitModalOpen(false)}
           onSave={addInitiative}
         />
@@ -2056,6 +2221,21 @@ export default function KanbanBoard() {
         />
       )}
 
+      {membersOpen && (
+        <ManageMembersModal
+          C={C}
+          members={members}
+          tasks={tasks}
+          initiatives={initiatives}
+          legacyNames={legacyAssigneeNames}
+          onAdd={addMember}
+          onRename={renameMember}
+          onRemove={removeMember}
+          onMerge={mergeLegacyName}
+          onClose={() => setMembersOpen(false)}
+        />
+      )}
+
       {previewAttachment && (
         <AttachmentPreview C={C} attachment={previewAttachment} onClose={() => setPreviewAttachment(null)} />
       )}
@@ -2064,7 +2244,7 @@ export default function KanbanBoard() {
         <TaskDetailModal
           C={C}
           task={tasks.find((t) => t.id === openTaskId)}
-          assignees={assignees.filter((a) => a !== "Todos")}
+          assignees={memberNames}
           initiatives={initiatives}
           onClose={() => setOpenTaskId(null)}
           onSave={(patch) => updateTask(openTaskId, patch)}
@@ -2077,7 +2257,7 @@ export default function KanbanBoard() {
         <InitiativeDetailDrawer
           C={C}
           initiative={initiatives.find((i) => idsMatch(i.id, openInitId))}
-          assignees={assignees.filter((a) => a !== "Todos")}
+          assignees={memberNames}
           onClose={() => setOpenInitId(null)}
           onSave={(patch) => updateInitiative(openInitId, patch)}
           onDelete={() => {
@@ -2166,7 +2346,7 @@ async function copyShareLink(title) {
   }
 }
 
-function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenPlane, onOpenTrash, trashCount }) {
+function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenPlane, onOpenTrash, trashCount, onOpenMembers }) {
   const [shareStatus, setShareStatus] = useState(null);
   const shareTimerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -2275,6 +2455,24 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
             title="Enviar iniciativas y tareas a Plane cuando quieran dejar de usar este Kanban"
           >
             Migrar a Plane
+          </button>
+          <button
+            onClick={onOpenMembers}
+            style={{
+              background: "none",
+              border: `1px solid ${C.border}`,
+              color: C.textMuted,
+              borderRadius: 8,
+              padding: "5px 10px",
+              cursor: "pointer",
+              fontSize: 12.5,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+            }}
+            aria-label="Usuarios"
+            title="Administrar la lista de personas que se pueden asignar, para que no queden duplicadas"
+          >
+            Usuarios
           </button>
           <button
             onClick={onOpenTrash}
@@ -3262,20 +3460,17 @@ function InitiativeCard({ C, initiative, onDelete, onAdjustProgress, onOpen, onE
 function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onDelete, onOpenBoard }) {
   const [title, setTitle] = useState(initiative.title || "");
   const [owner, setOwner] = useState(initiative.owner || "__none__");
-  const [customOwner, setCustomOwner] = useState("");
   const [status, setStatus] = useState(initiativeColumn(initiative));
   const [dueDate, setDueDate] = useState(initiative.dueDate || "");
   const [notes, setNotes] = useState(initiative.notes || "");
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState("");
   const saveNoticeTimer = useRef(null);
-  const useCustom = owner === "__custom__";
   const ownerOptions = Array.from(new Set([...(assignees || []), initiative.owner].filter(Boolean)));
 
   useEffect(() => {
     setTitle(initiative.title || "");
     setOwner(initiative.owner || "__none__");
-    setCustomOwner("");
     setStatus(initiativeColumn(initiative));
     setDueDate(initiative.dueDate || "");
     setNotes(initiative.notes || "");
@@ -3308,7 +3503,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
 
   function handleSaveNotes() {
     if (saving) return;
-    const finalOwner = useCustom ? customOwner.trim() : owner === "__none__" ? "" : owner;
+    const finalOwner = owner === "__none__" ? "" : owner;
     setSaving(true);
     onSave({
       title: title.trim() || initiative.title,
@@ -3444,7 +3639,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
           onChange={(e) => {
             const next = e.target.value;
             setOwner(next);
-            if (next !== "__custom__") patchField({ owner: next === "__none__" ? "" : next });
+            patchField({ owner: next === "__none__" ? "" : next });
           }}
           style={input}
         >
@@ -3454,19 +3649,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
               {a}
             </option>
           ))}
-          <option value="__custom__">Otro…</option>
         </select>
-        {useCustom && (
-          <input
-            value={customOwner}
-            onChange={(e) => setCustomOwner(e.target.value)}
-            onBlur={() => {
-              if (customOwner.trim()) patchField({ owner: customOwner.trim() });
-            }}
-            placeholder="Nombre del responsable"
-            style={{ ...input, marginTop: 8 }}
-          />
-        )}
 
         <label style={label}>Fecha de vencimiento</label>
         <input
@@ -3558,13 +3741,11 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
 function AddInitiativeModal({ C, assignees, onClose, onSave }) {
   const [title, setTitle] = useState("");
   const [owner, setOwner] = useState(assignees[0] || "__none__");
-  const [customOwner, setCustomOwner] = useState("");
   const [progress, setProgress] = useState(0);
-  const useCustom = owner === "__custom__";
 
   function handleSave() {
     if (!title.trim()) return;
-    const finalOwner = useCustom ? customOwner.trim() : owner === "__none__" ? "" : owner;
+    const finalOwner = owner === "__none__" ? "" : owner;
     onSave({ title: title.trim(), owner: finalOwner, progress });
   }
 
@@ -3604,16 +3785,7 @@ function AddInitiativeModal({ C, assignees, onClose, onSave }) {
               {a}
             </option>
           ))}
-          <option value="__custom__">Otro…</option>
         </select>
-        {useCustom && (
-          <input
-            value={customOwner}
-            onChange={(e) => setCustomOwner(e.target.value)}
-            placeholder="Nombre del responsable"
-            style={{ ...input, marginTop: 8 }}
-          />
-        )}
 
         <label style={label}>Progreso inicial: {progress}%</label>
         <input
@@ -3860,6 +4032,275 @@ function TrashModal({ C, tasks, initiatives, onRestoreTask, onRestoreInitiative,
             Cerrar
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ManageMembersModal({ C, members, tasks, initiatives, legacyNames, onAdd, onRename, onRemove, onMerge, onClose }) {
+  const [newName, setNewName] = useState("");
+  const [addError, setAddError] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editError, setEditError] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState(null);
+
+  function countFor(name) {
+    const t = (tasks || []).filter((x) => x.assignee === name).length;
+    const i = (initiatives || []).filter((x) => x.owner === name).length;
+    return t + i;
+  }
+
+  function handleAdd() {
+    const res = onAdd(newName);
+    if (!res.ok) {
+      setAddError(res.error);
+      return;
+    }
+    setNewName("");
+    setAddError("");
+  }
+
+  function startEdit(m) {
+    setEditingId(m.id);
+    setEditName(m.name);
+    setEditError("");
+  }
+
+  function saveEdit(id) {
+    const res = onRename(id, editName);
+    if (!res.ok) {
+      setEditError(res.error);
+      return;
+    }
+    setEditingId(null);
+    setEditError("");
+  }
+
+  const row = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "7px 0",
+    borderBottom: `1px solid ${C.borderSoft}`,
+  };
+  const smallGhostBtn = {
+    background: "none",
+    border: `1px solid ${C.border}`,
+    color: C.textMuted,
+    borderRadius: 8,
+    padding: "4px 9px",
+    cursor: "pointer",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+  };
+  const smallDangerBtn = {
+    background: "none",
+    border: `1px solid ${C.danger}`,
+    color: C.danger,
+    borderRadius: 8,
+    padding: "4px 9px",
+    cursor: "pointer",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(8,10,14,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        zIndex: 50,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Usuarios del tablero"
+        style={{
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 12,
+          width: "100%",
+          maxWidth: 480,
+          padding: 20,
+          maxHeight: "84vh",
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 600 }}>Usuarios</div>
+          <button
+            onClick={onClose}
+            aria-label="Cerrar"
+            style={{ background: "none", border: "none", color: C.textFaint, cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 4 }}
+          >
+            ✕
+          </button>
+        </div>
+        <div style={{ fontSize: 12.5, color: C.textMuted, marginBottom: 14, lineHeight: 1.5 }}>
+          Esta es la lista de personas que se pueden asignar en el tablero. No hay contraseñas ni inicio de sesión:
+          es solo para que todos elijan siempre el mismo nombre y no queden responsables duplicados.
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleAdd();
+              }
+            }}
+            placeholder="Nombre de la persona"
+            style={{ ...inputStyle(C), flex: 1 }}
+          />
+          <button onClick={handleAdd} style={primaryBtn(C)}>
+            Agregar
+          </button>
+        </div>
+        {addError && <div style={{ fontSize: 12, color: C.danger, marginBottom: 10 }}>{addError}</div>}
+
+        <div style={{ marginTop: 12, marginBottom: legacyNames && legacyNames.length ? 18 : 0 }}>
+          {members.length === 0 && (
+            <div style={{ fontSize: 13, color: C.textFaint, padding: "10px 0" }}>Todavía no hay nadie en la lista.</div>
+          )}
+          {members.map((m) => {
+            const isEditing = editingId === m.id;
+            const n = countFor(m.name);
+            return (
+              <div key={m.id} style={row}>
+                <span
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    background: AVATAR_COLORS[members.indexOf(m) % AVATAR_COLORS.length],
+                    color: "#fff",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {initials(m.name)}
+                </span>
+                {isEditing ? (
+                  <input
+                    autoFocus
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveEdit(m.id);
+                      if (e.key === "Escape") setEditingId(null);
+                    }}
+                    style={{ ...inputStyle(C), flex: 1, padding: "4px 8px" }}
+                  />
+                ) : (
+                  <div style={{ flex: 1, fontSize: 13.5, color: C.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {m.name}
+                  </div>
+                )}
+                <span style={{ fontSize: 11, color: C.textFaint, flexShrink: 0 }}>
+                  {n} {n === 1 ? "tarea" : "tareas"}
+                </span>
+                {isEditing ? (
+                  <>
+                    <button onClick={() => saveEdit(m.id)} style={smallGhostBtn}>
+                      Guardar
+                    </button>
+                    <button onClick={() => setEditingId(null)} style={smallGhostBtn}>
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => startEdit(m)} style={smallGhostBtn}>
+                      Renombrar
+                    </button>
+                    <button onClick={() => setConfirmRemove({ id: m.id, name: m.name, count: n })} style={smallDangerBtn}>
+                      Quitar
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {editError && <div style={{ fontSize: 12, color: C.danger, marginTop: 4 }}>{editError}</div>}
+        </div>
+
+        {confirmRemove && (
+          <div style={{ background: C.surfaceRaised, border: `1px solid ${C.danger}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+            <div style={{ fontSize: 13, color: C.text, marginBottom: 10, lineHeight: 1.45 }}>
+              Quitar a «{confirmRemove.name}»
+              {confirmRemove.count ? ` dejará ${confirmRemove.count} tarea${confirmRemove.count === 1 ? "" : "s"} sin asignar.` : "."}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={() => setConfirmRemove(null)} style={ghostBtn(C)}>
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  onRemove(confirmRemove.id);
+                  setConfirmRemove(null);
+                }}
+                style={{ background: C.danger, border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 12.5, fontWeight: 700 }}
+              >
+                Quitar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {legacyNames && legacyNames.length > 0 && (
+          <div>
+            <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>
+              Nombres sueltos encontrados
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 10, lineHeight: 1.5 }}>
+              Aparecen en tareas o iniciativas pero no están en la lista de arriba. Es probable que sean la misma
+              persona escrita distinto: fusiónalos con alguien de la lista o agrégalos como un usuario nuevo.
+            </div>
+            {legacyNames.map(({ name, count }) => (
+              <div key={name} style={row}>
+                <div style={{ flex: 1, fontSize: 13, color: C.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {name} <span style={{ color: C.textFaint, fontSize: 11 }}>· {count}</span>
+                </div>
+                <select
+                  defaultValue="__pick__"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "__new__") {
+                      onAdd(name);
+                    } else if (val && val !== "__pick__") {
+                      onMerge(name, val);
+                    }
+                    e.target.value = "__pick__";
+                  }}
+                  style={{ ...inputStyle(C), width: "auto", padding: "4px 8px", fontSize: 12, flexShrink: 0 }}
+                >
+                  <option value="__pick__">Fusionar con…</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+                  <option value="__new__">Agregar como nuevo usuario</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4186,14 +4627,12 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
   const [dropActive, setDropActive] = useState(false);
   const [type, setType] = useState(task.type || "Task");
   const [assignee, setAssignee] = useState(task.assignee || "__none__");
-  const [customAssignee, setCustomAssignee] = useState("");
   const [status, setStatus] = useState(task.status || "backlog");
   const [dueDate, setDueDate] = useState(task.dueDate || "");
   const [blocked, setBlocked] = useState(!!task.blocked);
   const [saveNotice, setSaveNotice] = useState("");
   const fileInputRef = useRef(null);
   const saveNoticeTimer = useRef(null);
-  const useCustom = assignee === "__custom__";
   const linkedInitiative = (initiatives || []).find((i) => idsMatch(i.id, task.initiativeId));
   const ownerOptions = Array.from(new Set([...(assignees || []), task.assignee].filter(Boolean)));
 
@@ -4206,7 +4645,6 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
     setAttachError(null);
     setType(task.type || "Task");
     setAssignee(task.assignee || "__none__");
-    setCustomAssignee("");
     setStatus(task.status || "backlog");
     setDueDate(task.dueDate || "");
     setBlocked(!!task.blocked);
@@ -4255,7 +4693,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
 
   async function handleSaveNotes() {
     if (saving) return;
-    const finalAssignee = useCustom ? customAssignee.trim() : assignee === "__none__" ? "" : assignee.trim();
+    const finalAssignee = assignee === "__none__" ? "" : assignee.trim();
     setSaving(true);
     setAttachError(null);
     try {
@@ -4408,7 +4846,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
           onChange={(e) => {
             const next = e.target.value;
             setAssignee(next);
-            if (next !== "__custom__") patchField({ assignee: next === "__none__" ? "" : next });
+            patchField({ assignee: next === "__none__" ? "" : next });
           }}
           style={input}
         >
@@ -4418,19 +4856,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
               {a}
             </option>
           ))}
-          <option value="__custom__">Otro…</option>
         </select>
-        {useCustom && (
-          <input
-            value={customAssignee}
-            onChange={(e) => setCustomAssignee(e.target.value)}
-            onBlur={() => {
-              if (customAssignee.trim()) patchField({ assignee: customAssignee.trim() });
-            }}
-            placeholder="Nombre del responsable"
-            style={{ ...input, marginTop: 8 }}
-          />
-        )}
 
         <label style={label}>Fecha de vencimiento</label>
         <input
@@ -4733,12 +5159,10 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
   const [dropActive, setDropActive] = useState(false);
   const [type, setType] = useState("Task");
   const [assignee, setAssignee] = useState("__none__");
-  const [customAssignee, setCustomAssignee] = useState("");
   const [status, setStatus] = useState("backlog");
   const [dueDate, setDueDate] = useState("");
   const [blocked, setBlocked] = useState(false);
   const fileInputRef = useRef(null);
-  const useCustom = assignee === "__custom__";
 
   async function addFiles(fileList) {
     const files = Array.from(fileList || []);
@@ -4764,7 +5188,7 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
 
   async function handleSave() {
     if (!title.trim() || saving) return;
-    const finalAssignee = useCustom ? customAssignee.trim() : assignee === "__none__" ? "" : assignee.trim();
+    const finalAssignee = assignee === "__none__" ? "" : assignee.trim();
     setSaving(true);
     setAttachError(null);
     try {
@@ -4856,11 +5280,7 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
               {a}
             </option>
           ))}
-          <option value="__custom__">Otro…</option>
         </select>
-        {useCustom && (
-          <input value={customAssignee} onChange={(e) => setCustomAssignee(e.target.value)} placeholder="Nombre del responsable" style={{ ...input, marginTop: 8 }} />
-        )}
 
         <label style={label}>Fecha de vencimiento</label>
         <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} placeholder="dd / mm / aaaa" style={input} />
