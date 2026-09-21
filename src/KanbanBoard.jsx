@@ -62,6 +62,15 @@ const COLUMNS = [
 ];
 const BOARD_COLUMNS = COLUMNS.filter((c) => c.id !== "done");
 
+// Desplegable rápido de estado en la tarjeta (mismos 5 estados y colores que en Plane).
+const CARD_STATUS_OPTIONS = [
+  { id: "backlog", label: "Nuevo", color: "#1098AD" },
+  { id: "in_progress", label: "En progreso", color: "#3F1FE8" },
+  { id: "review", label: "En revisión", color: "#F08C00" },
+  { id: "blocked", label: "Bloqueado", color: "#F05823" },
+  { id: "done", label: "Cerrado", color: "#087F5B" },
+];
+
 const ROSTER = ["Mafe", "William", "Alejo", "Aleja", "Fran", "Ivan"];
 const AVATAR_COLORS = ["#3EE0B4", "#8B8CFF", "#5B8CFF", "#F0C14B", "#F07178", "#B48EDE"];
 
@@ -2080,6 +2089,7 @@ export default function KanbanBoard() {
                           onMoveRight={() => moveByOffset(task.id, 1)}
                           onDelete={() => deleteTask(task.id)}
                           onToggleBlocked={() => toggleBlocked(task.id)}
+                          onChangeStatus={(status) => moveTask(task.id, status)}
                           onOpen={() => setOpenTaskId(task.id)}
                           initiative={initiatives.find((i) => idsMatch(i.id, task.initiativeId)) || null}
                         />
@@ -4436,7 +4446,7 @@ function FilterChip({ C, active, label, onClick, dotColor }) {
   );
 }
 
-function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveLeft, onMoveRight, onDelete, onToggleBlocked, onOpen, initiative }) {
+function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveLeft, onMoveRight, onDelete, onToggleBlocked, onChangeStatus, onOpen, initiative }) {
   const [hover, setHover] = useState(false);
   const typeMeta = TASK_TYPES[task.type] || TASK_TYPES.Task;
   const isOverdue = isOverdueTask(task);
@@ -4506,6 +4516,10 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
             </button>
           </div>
         )}
+      </div>
+
+      <div style={{ marginBottom: 8 }}>
+        <StatusQuickMenu C={C} status={task.status} onChange={(next) => onChangeStatus && onChangeStatus(next)} />
       </div>
 
       {recentlyChangedStatus(task) && (
@@ -4596,6 +4610,111 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
           )}
         </div>
       </div>
+    </div>
+  );
+}
+function StatusQuickMenu({ C, status, onChange }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(e) {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [open]);
+
+  const known = CARD_STATUS_OPTIONS.find((s) => s.id === status);
+  const fallback = COLUMNS.find((c) => c.id === status);
+  const current = known || {
+    id: status,
+    label: fallback ? fallback.label : "Nuevo",
+    color: fallback ? fallback.dot : CARD_STATUS_OPTIONS[0].color,
+  };
+
+  return (
+    <div ref={rootRef} style={{ position: "relative", display: "inline-block", flexShrink: 0 }}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-label={`Cambiar estado (actual: ${current.label})`}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          background: current.color,
+          color: "#fff",
+          border: "none",
+          borderRadius: 20,
+          padding: "3px 8px 3px 9px",
+          fontSize: 11,
+          fontWeight: 700,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+          lineHeight: 1.4,
+        }}
+      >
+        {current.label}
+        <span style={{ fontSize: 9 }}>▾</span>
+      </button>
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 30,
+            background: C.surfaceRaised,
+            border: `1px solid ${C.border}`,
+            borderRadius: 10,
+            padding: 5,
+            minWidth: 150,
+            boxShadow: "0 10px 28px rgba(0,0,0,0.35)",
+          }}
+        >
+          {CARD_STATUS_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => {
+                onChange(opt.id);
+                setOpen(false);
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                background: opt.id === status ? C.surface : "none",
+                border: "none",
+                borderRadius: 6,
+                padding: "6px 8px",
+                fontSize: 12.5,
+                fontWeight: opt.id === status ? 700 : 500,
+                color: C.text,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <span
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: "50%",
+                  background: opt.color,
+                  flexShrink: 0,
+                  display: "inline-block",
+                }}
+              />
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
