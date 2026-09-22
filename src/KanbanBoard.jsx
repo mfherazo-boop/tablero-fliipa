@@ -5527,7 +5527,7 @@ function AddTaskModal({ C, assignees, initiatives, defaultInitiativeId, onClose,
           ))}
         </select>
 
-        <label style={label}>Etiqueta (opcional)</label>
+        <label style={label}>Tipo de elemento (opcional)</label>
         <select value={type} onChange={(e) => setType(e.target.value)} style={input}>
           {Object.entries(TASK_TYPES).map(([key, val]) => (
             <option key={key} value={key}>
