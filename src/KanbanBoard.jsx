@@ -3610,8 +3610,6 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
   const [dueDate, setDueDate] = useState(initiative.dueDate || "");
   const [notes, setNotes] = useState(initiative.notes || "");
   const [saving, setSaving] = useState(false);
-  const [saveNotice, setSaveNotice] = useState("");
-  const saveNoticeTimer = useRef(null);
   const ownerOptions = Array.from(new Set([...(assignees || []), initiative.owner].filter(Boolean)));
 
   useEffect(() => {
@@ -3620,14 +3618,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
     setStatus(initiativeColumn(initiative));
     setDueDate(initiative.dueDate || "");
     setNotes(initiative.notes || "");
-    setSaveNotice("");
   }, [initiative.id]);
-
-  useEffect(() => {
-    return () => {
-      if (saveNoticeTimer.current) clearTimeout(saveNoticeTimer.current);
-    };
-  }, []);
 
   useEffect(() => {
     function onKey(e) {
@@ -3639,12 +3630,6 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
 
   function patchField(partial) {
     onSave(partial);
-  }
-
-  function flashSaved() {
-    setSaveNotice("Nota guardada");
-    if (saveNoticeTimer.current) clearTimeout(saveNoticeTimer.current);
-    saveNoticeTimer.current = setTimeout(() => setSaveNotice(""), 2800);
   }
 
   function handleSaveNotes() {
@@ -3662,7 +3647,6 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
       notesHistory: notesChanged ? pushNoteHistory(initiative.notesHistory, initiative.notes) : initiative.notesHistory,
     });
     setSaving(false);
-    flashSaved();
   }
 
   const history = [];
@@ -3834,24 +3818,6 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
         >
           {saving ? "Guardando…" : "Guardar notas"}
         </button>
-        {saveNotice && (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              marginTop: 10,
-              background: C.accentSoft,
-              color: C.accent,
-              borderRadius: 8,
-              padding: "8px 12px",
-              fontSize: 13,
-              fontWeight: 700,
-              textAlign: "center",
-            }}
-          >
-            Tu nota ha sido guardada con éxito
-          </div>
-        )}
 
         <div style={{ fontSize: 12, color: C.textFaint, marginTop: 14 }}>
           Actualizada {formatUpdated(initiative.updatedAt || initiative.createdAt || Date.now())}
@@ -4894,9 +4860,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
   const [status, setStatus] = useState(task.status || "backlog");
   const [dueDate, setDueDate] = useState(task.dueDate || "");
   const [blocked, setBlocked] = useState(!!task.blocked);
-  const [saveNotice, setSaveNotice] = useState("");
   const fileInputRef = useRef(null);
-  const saveNoticeTimer = useRef(null);
   const linkedInitiative = (initiatives || []).find((i) => idsMatch(i.id, task.initiativeId));
   const ownerOptions = Array.from(new Set([...(assignees || []), task.assignee].filter(Boolean)));
 
@@ -4912,14 +4876,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
     setStatus(task.status || "backlog");
     setDueDate(task.dueDate || "");
     setBlocked(!!task.blocked);
-    setSaveNotice("");
   }, [task.id]);
-
-  useEffect(() => {
-    return () => {
-      if (saveNoticeTimer.current) clearTimeout(saveNoticeTimer.current);
-    };
-  }, []);
 
   useEffect(() => {
     function onKey(e) {
@@ -4979,9 +4936,6 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
       });
       setPending([]);
       setSaving(false);
-      setSaveNotice("Nota guardada");
-      if (saveNoticeTimer.current) clearTimeout(saveNoticeTimer.current);
-      saveNoticeTimer.current = setTimeout(() => setSaveNotice(""), 2800);
     } catch (e) {
       setAttachError("No se pudieron guardar los cambios. Intenta de nuevo.");
       setSaving(false);
@@ -5307,24 +5261,6 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
         >
           {saving ? "Guardando…" : "Guardar notas"}
         </button>
-        {saveNotice && (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              marginTop: 10,
-              background: C.accentSoft,
-              color: C.accent,
-              borderRadius: 8,
-              padding: "8px 12px",
-              fontSize: 13,
-              fontWeight: 700,
-              textAlign: "center",
-            }}
-          >
-            Tu nota ha sido guardada con éxito
-          </div>
-        )}
 
         <div style={{ fontSize: 12, color: C.textFaint, marginTop: 14 }}>
           Actualizada {formatUpdated(task.updatedAt || task.statusChangedAt || task.createdAt || Date.now())}
