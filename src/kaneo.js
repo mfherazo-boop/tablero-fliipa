@@ -17,23 +17,29 @@ export const KANEO_SOURCE = "fliipa-kanban";
 // Debe coincidir con los nombres reales de las columnas de tu proyecto en Kaneo
 // (Sumz / Fliipa): Backlog, Blocked, In progress, PR review, QA dev, QA Prod, Hecho.
 const COLUMN_HINTS = {
-  backlog: ["backlog", "pendiente"],
+  backlog: ["backlog", "pendiente", "to-do", "to do", "todo"],
   blocked: ["blocked", "bloqueado"],
   in_progress: ["in progress", "in development", "progreso", "doing"],
-  review: ["pr review", "review", "revisión", "revision"],
+  review: ["pr review", "review", "revisión", "revision", "in-review"],
   dev_qa: ["qa dev", "dev qa"],
   product_qa: ["qa prod", "product qa"],
   done: ["hecho", "completado", "done", "cerrado"],
 };
 
+// Slugs reales del proyecto Fliipa en orbit.sumz.co (Kaneo los reveló tal cual
+// en el error de la primera migración real: "Valid statuses for this project:
+// to-do, blocked, in-progress, in-review, qa-prod, done, qa-production, planned,
+// archived"). Se usan de respaldo cuando no se logra leer la lista de columnas
+// en vivo. "QA dev" ↔ qa-production y "QA Prod" ↔ qa-prod es lo único no 100%
+// confirmado — si alguna tarea cae en la columna QA equivocada, se intercambian.
 const FLIIPA_COLUMN_LABEL = {
-  backlog: "Backlog",
-  blocked: "Blocked",
-  in_progress: "In progress",
-  review: "PR review",
-  dev_qa: "QA dev",
-  product_qa: "QA Prod",
-  done: "Hecho",
+  backlog: "to-do",
+  blocked: "blocked",
+  in_progress: "in-progress",
+  review: "in-review",
+  dev_qa: "qa-production",
+  product_qa: "qa-prod",
+  done: "done",
 };
 
 export function normalizeBase(url) {
@@ -193,8 +199,8 @@ export function matchStatus(statuses, columnId) {
     return hints.some((h) => name.includes(h));
   });
   if (found) return found.slug || found.id || found.name;
-  // Sin lista de columnas reales: se manda el nombre tal cual como texto de estado.
-  return FLIIPA_COLUMN_LABEL[columnId] || "Backlog";
+  // Sin lista de columnas reales: se manda el slug real conocido de Fliipa/Kaneo.
+  return FLIIPA_COLUMN_LABEL[columnId] || FLIIPA_COLUMN_LABEL.backlog;
 }
 
 // Miembros del proyecto/workspace, para poder asignar userId. La ruta exacta no está
