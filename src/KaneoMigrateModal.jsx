@@ -56,8 +56,8 @@ export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems,
   const [summary, setSummary] = useState(null);
   const [browserBlocked, setBrowserBlocked] = useState(false);
 
-  const totalItems = (tasks || []).length + (initiatives || []).length;
-  const already = (tasks || []).filter((t) => t.kaneoTaskId).length + (initiatives || []).filter((i) => i.kaneoTaskId).length;
+  const totalItems = (tasks || []).length;
+  const already = (tasks || []).filter((t) => t.kaneoTaskId).length;
   const audit = useMemo(() => auditMigration({ tasks, initiatives, deletedItems }), [tasks, initiatives, deletedItems]);
 
   const label = { display: "block", fontSize: 12, color: C.textMuted, marginTop: 12, marginBottom: 5 };
@@ -106,7 +106,7 @@ export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems,
     if (!apiKey.trim()) return "Pega la API key que generaste en Kaneo (Configuración de cuenta → API Keys).";
     if (!baseUrl.trim()) return "Falta la URL de tu instancia de Kaneo.";
     if (!projectId.trim()) return "Falta el ID del proyecto destino (está en la URL del tablero de Kaneo).";
-    if (!totalItems) return "No hay tareas ni iniciativas para migrar.";
+    if (!totalItems) return "No hay tareas para migrar.";
     return "";
   }
 
@@ -160,6 +160,9 @@ export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems,
         onProgress: setProgress,
         onItemMigrated,
       });
+      // Nota: `initiatives` sigue viajando aquí solo porque migrateToKaneo la usa
+      // para buscar el título de la iniciativa de cada tarea (texto en la descripción);
+      // ya no crea tarjetas de Kaneo a partir de iniciativas.
       setSummary(result);
       setProgress(null);
       setStatus("done");
@@ -199,12 +202,12 @@ export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems,
         </div>
         <div style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.5, marginBottom: 8 }}>
           Sigan trabajando aquí. Esta opción envía{" "}
-          <strong style={{ color: C.text, fontWeight: 600 }}>todas las iniciativas y tareas</strong> al proyecto de
-          Kaneo que indiques. No borra ni deja de sincronizar este tablero.
+          <strong style={{ color: C.text, fontWeight: 600 }}>las tareas</strong> al proyecto de Kaneo que indiques
+          (las iniciativas no se crean como tarjetas aparte; cada tarea lleva su iniciativa escrita en la
+          descripción). No borra ni deja de sincronizar este tablero.
         </div>
         <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 10 }}>
-          Ahora mismo hay {tasks.length} tarea{tasks.length === 1 ? "" : "s"} y {initiatives.length} iniciativa
-          {initiatives.length === 1 ? "" : "s"}
+          Ahora mismo hay {tasks.length} tarea{tasks.length === 1 ? "" : "s"}
           {already ? ` · ${already} ya vinculadas a Kaneo` : ""}.
         </div>
 

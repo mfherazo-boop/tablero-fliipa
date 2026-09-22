@@ -293,14 +293,6 @@ function buildTaskDescription(task, initiative) {
   return lines.join("\n") || "Migrada desde el tablero Kanban de Fliipa";
 }
 
-function buildInitiativeDescription(initiative) {
-  const lines = ["Iniciativa migrada desde Fliipa."];
-  if (initiative.notes) lines.push(initiative.notes);
-  lines.push(`Responsable en Fliipa: ${initiative.owner || "Sin asignar"}`);
-  lines.push(`Progreso en Fliipa: ${Number(initiative.progress) || 0}%`);
-  return lines.join("\n");
-}
-
 export function droppedIdsOf(deletedItems, deletedIds) {
   const records = deletedItems && deletedItems.length ? deletedItems : (deletedIds || []).map((id) => ({ id }));
   return new Set(records.map((row) => String(row.id || row)).filter(Boolean));
@@ -366,24 +358,6 @@ async function updateTask(cfg, taskId, patch) {
   return kaneoRequest({ ...cfg, method: "PUT", path: `/task/${taskId}`, body: patch });
 }
 
-async function linkSubtask(cfg, parentTaskId, childTaskId) {
-  // Ruta best-effort: la API de Kaneo expone relaciones entre tareas
-  // (relationType: "subtask" | "blocks" | "related") en un endpoint aparte;
-  // si no calza en tu versión, la tarea igual queda creada, solo sin el
-  // vínculo visual a la iniciativa (la iniciativa queda mencionada en su texto).
-  try {
-    await kaneoRequest({
-      ...cfg,
-      method: "POST",
-      path: `/task/${parentTaskId}/relation`,
-      body: { targetTaskId: childTaskId, relationType: "subtask" },
-    });
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -402,6 +376,9 @@ export async function migrateToKaneo({
 }) {
   const cfg = { baseUrl, apiKey, workspaceId, projectId };
   const deletedRecords = deletedItems && deletedItems.length ? deletedItems : (deletedIds || []).map((id) => ({ id }));
+  // Solo las tareas se migran como tarjetas de Kaneo. Las iniciativas de Fliipa no
+  // cruzan como tarjetas propias — cada tarea ya lleva "Iniciativa: X" en su
+  // descripción, para no llenar el tablero de Kaneo con tarjetas que no son tareas.
   const { liveTasks, liveInits } = liveMigrationItems({ tasks, initiatives, deletedItems: deletedRecords });
 
   const statuses = await listProjectStatuses(cfg);
@@ -414,69 +391,42 @@ export async function migrateToKaneo({
 
   const summary = { created: 0, updated: 0, failed: 0, errors: [] };
   const kaneoIds = {};
-  liveInits.forEach((ini) => {
-    if (ini.kaneoTaskId) kaneoIds[ini.id] = ini.kaneoTaskId;
-  });
   liveTasks.forEach((task) => {
     if (task.kaneoTaskId) kaneoIds[task.id] = task.kaneoTaskId;
   });
 
-  const items = [
-    ...liveInits.map((initiative) => ({ kind: "initiative", item: initiative })),
-    ...liveTasks.map((task) => ({ kind: "task", item: task })),
-  ];
-
-  for (let i = 0; i < items.length; i++) {
-    const { kind, item } = items[i];
-    if (onProgress) onProgress({ current: i + 1, total: items.length, label: item.title || item.id });
+  for (let i = 0; i < liveTasks.length; i++) {
+    const task = liveTasks[i];
+    if (onProgress) onProgress({ current: i + 1, total: liveTasks.length, label: task.title || task.id });
     try {
-      const status =
-        kind === "task"
-          ? matchStatus(statuses, item.status)
-          : matchStatus(statuses, item.status || "backlog");
-      const priority = item.blocked ? "high" : "no-priority";
+      const status = matchStatus(statuses, task.status);
+      const priority = task.blocked ? "high" : "no-priority";
       let userId = null;
-      if (kind === "task" && item.assignee) {
-        const member = matchMember(members, item.assignee);
-        userId = member ? memberId(member) : null;
-      } else if (kind === "initiative" && item.owner) {
-        const member = matchMember(members, item.owner);
+      if (task.assignee) {
+        const member = matchMember(members, task.assignee);
         userId = member ? memberId(member) : null;
       }
-      const description =
-        kind === "task"
-          ? buildTaskDescription(item, liveInits.find((ini) => sameId(ini.id, item.initiativeId)))
-          : buildInitiativeDescription(item);
+      const description = buildTaskDescription(task, liveInits.find((ini) => sameId(ini.id, task.initiativeId)));
 
-      const existingId = kaneoIds[item.id];
+      const existingId = kaneoIds[task.id];
       let saved;
       if (existingId) {
-        saved = await updateTask(cfg, existingId, { title: item.title, description, priority, status, userId });
+        saved = await updateTask(cfg, existingId, { title: task.title, description, priority, status, userId });
         saved = saved && saved.id ? saved : { id: existingId };
         summary.updated += 1;
       } else {
-        saved = await createTask(cfg, { title: item.title, description, priority, status, userId });
+        saved = await createTask(cfg, { title: task.title, description, priority, status, userId });
         summary.created += 1;
       }
       if (saved?.id) {
-        kaneoIds[item.id] = saved.id;
-        if (onItemMigrated) onItemMigrated({ kind, id: item.id, kaneoTaskId: saved.id });
+        kaneoIds[task.id] = saved.id;
+        if (onItemMigrated) onItemMigrated({ kind: "task", id: task.id, kaneoTaskId: saved.id });
       }
     } catch (e) {
       summary.failed += 1;
-      summary.errors.push(`${item.title || item.id}: ${e.message}`);
+      summary.errors.push(`${task.title || task.id}: ${e.message}`);
     }
     await sleep(200);
-  }
-
-  // Segunda pasada: enlazar tareas con su iniciativa como subtarea (best-effort).
-  for (const task of liveTasks) {
-    if (!task.initiativeId) continue;
-    const parentKaneoId = kaneoIds[task.initiativeId];
-    const childKaneoId = kaneoIds[task.id];
-    if (!parentKaneoId || !childKaneoId) continue;
-    await linkSubtask(cfg, parentKaneoId, childKaneoId);
-    await sleep(120);
   }
 
   return summary;

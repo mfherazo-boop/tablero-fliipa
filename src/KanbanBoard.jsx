@@ -2599,7 +2599,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
               whiteSpace: "nowrap",
             }}
             aria-label="Migrar todo a Kaneo"
-            title="Enviar iniciativas y tareas a Kaneo cuando quieran dejar de usar este Kanban"
+            title="Enviar las tareas a Kaneo (cada una con su iniciativa en la descripción) cuando quieran dejar de usar este Kanban"
           >
             Migrar a Kaneo
           </button>
@@ -2936,7 +2936,7 @@ const INFO_TOPICS = [
     id: "kaneo",
     title: "Migrar a Kaneo",
     kicker: "Cuando dejen este Kanban",
-    body: "Migrar a Kaneo copia iniciativas y tareas al proyecto de Kaneo del equipo (Sumz / Fliipa). Sirve para dejar de usar este tablero, no para el día a día. Hace falta una API key de tu cuenta de Kaneo. Los títulos no tienen que coincidir: el vínculo queda guardado en cada tarea de Fliipa, así que volver a migrar actualiza en vez de duplicar.",
+    body: "Migrar a Kaneo copia las tareas (no las iniciativas como tarjetas aparte — cada tarea lleva su iniciativa escrita en la descripción) al proyecto de Kaneo del equipo (Sumz / Fliipa). Sirve para dejar de usar este tablero, no para el día a día. Hace falta una API key de tu cuenta de Kaneo. Los títulos no tienen que coincidir: el vínculo queda guardado en cada tarea de Fliipa, así que volver a migrar actualiza en vez de duplicar.",
     steps: [
       "Generar la API key en Kaneo (Configuración de cuenta → API Keys).",
       "Pegarla en el modal y pulsar Conectar, luego Migrar a Kaneo.",
