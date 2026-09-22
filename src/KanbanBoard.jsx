@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import PlaneMigrateModal from "./PlaneMigrateModal";
+import KaneoMigrateModal from "./KaneoMigrateModal";
 import { mergeImportedInitiatives, parseImportedBoard } from "./importLegacy";
 import { foldName, resolvePersonNick } from "./plane";
 
@@ -331,6 +331,7 @@ function purgeEntry(entry, id) {
       id: (item && item.id) || id,
       title: (item && item.title) || "",
       planeWorkItemId: (item && item.planeWorkItemId) || null,
+      kaneoTaskId: (item && item.kaneoTaskId) || null,
     },
   };
 }
@@ -658,7 +659,7 @@ export default function KanbanBoard() {
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const [openTaskId, setOpenTaskId] = useState(null);
   const [openInitId, setOpenInitId] = useState(null);
-  const [planeOpen, setPlaneOpen] = useState(false);
+  const [kaneoOpen, setKaneoOpen] = useState(false);
   const [initiatives, setInitiatives] = useState([]);
   const [members, setMembers] = useState([]);
   const [membersOpen, setMembersOpen] = useState(false);
@@ -1415,8 +1416,8 @@ export default function KanbanBoard() {
     );
   }
 
-  function markPlaneItem({ kind, id, planeWorkItemId }) {
-    const patch = { planeWorkItemId, planeMigratedAt: Date.now() };
+  function markKaneoItem({ kind, id, kaneoTaskId }) {
+    const patch = { kaneoTaskId, kaneoMigratedAt: Date.now() };
     if (kind === "initiative") updateInitiative(id, patch);
     else updateTask(id, patch);
   }
@@ -1733,7 +1734,7 @@ export default function KanbanBoard() {
           syncStatus={saving ? "saving" : !error ? "ok" : error === "no-storage" ? "local" : "error"}
           onOpenExport={() => setExportOpen(true)}
           onOpenImport={() => setImportOpen(true)}
-          onOpenPlane={() => setPlaneOpen(true)}
+          onOpenKaneo={() => setKaneoOpen(true)}
           onOpenTrash={() => setTrashOpen(true)}
           trashCount={trashList(deletedTaskIds).length + trashList(deletedInitIds).length}
           onOpenMembers={() => setMembersOpen(true)}
@@ -2418,8 +2419,8 @@ export default function KanbanBoard() {
         />
       )}
 
-      {planeOpen && (
-        <PlaneMigrateModal
+      {kaneoOpen && (
+        <KaneoMigrateModal
           C={C}
           tasks={tasks}
           initiatives={initiatives}
@@ -2427,16 +2428,16 @@ export default function KanbanBoard() {
             ...trashList(deletedTaskIds, { includePurged: true }).map((entry) => ({
               id: entry.id,
               title: entry.item?.title || "",
-              planeWorkItemId: entry.item?.planeWorkItemId || null,
+              kaneoTaskId: entry.item?.kaneoTaskId || null,
             })),
             ...trashList(deletedInitIds, { includePurged: true }).map((entry) => ({
               id: entry.id,
               title: entry.item?.title || "",
-              planeWorkItemId: entry.item?.planeWorkItemId || null,
+              kaneoTaskId: entry.item?.kaneoTaskId || null,
             })),
           ]}
-          onClose={() => setPlaneOpen(false)}
-          onItemMigrated={markPlaneItem}
+          onClose={() => setKaneoOpen(false)}
+          onItemMigrated={markKaneoItem}
           onBackup={() => {
             const payload = {
               savedAt: Date.now(),
@@ -2492,7 +2493,7 @@ async function copyShareLink(title) {
   }
 }
 
-function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenPlane, onOpenTrash, trashCount, onOpenMembers }) {
+function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, syncStatus, onOpenExport, onOpenImport, onOpenKaneo, onOpenTrash, trashCount, onOpenMembers }) {
   const [shareStatus, setShareStatus] = useState(null);
   const shareTimerRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -2585,7 +2586,7 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
           </div>
           <button
             className="fliipa-plane-btn"
-            onClick={onOpenPlane}
+            onClick={onOpenKaneo}
             style={{
               background: C.accentSoft,
               border: `1px solid ${C.accent}`,
@@ -2597,10 +2598,10 @@ function TopBar({ C, dark, onToggleDark, activeTab, setActiveTab, lastUpdated, s
               fontWeight: 700,
               whiteSpace: "nowrap",
             }}
-            aria-label="Migrar todo a Plane"
-            title="Enviar iniciativas y tareas a Plane cuando quieran dejar de usar este Kanban"
+            aria-label="Migrar todo a Kaneo"
+            title="Enviar iniciativas y tareas a Kaneo cuando quieran dejar de usar este Kanban"
           >
-            Migrar a Plane
+            Migrar a Kaneo
           </button>
           <button
             onClick={onOpenMembers}
@@ -2924,7 +2925,7 @@ const INFO_TOPICS = [
     id: "papelera",
     title: "Papelera",
     kicker: "Nada se pierde",
-    body: "Al eliminar una tarea o una iniciativa no desaparece: pasa a Papelera. Desde ahí puedes restaurarla o borrarla para siempre. Lo que está o estuvo en papelera no vuelve a Plane al migrar.",
+    body: "Al eliminar una tarea o una iniciativa no desaparece: pasa a Papelera. Desde ahí puedes restaurarla o borrarla para siempre. Lo que está o estuvo en papelera no vuelve a Kaneo al migrar.",
     steps: [
       "Abre Papelera en la barra de arriba.",
       "Restaurar la devuelve al tablero con sus datos.",
@@ -2932,15 +2933,14 @@ const INFO_TOPICS = [
     ],
   },
   {
-    id: "plane",
-    title: "Migrar a Plane",
+    id: "kaneo",
+    title: "Migrar a Kaneo",
     kicker: "Cuando dejen este Kanban",
-    body: "Migrar a Plane copia iniciativas y tareas al proyecto de Plane del equipo. Sirve para dejar de usar este tablero, no para el día a día. Hace falta la API key de Mafe y permiso de escritura. Los títulos no tienen que coincidir con Plane: el vínculo es el ID. Una tarea cuya iniciativa ya no existe igual se migra, suelta.",
+    body: "Migrar a Kaneo copia iniciativas y tareas al proyecto de Kaneo del equipo (Sumz / Fliipa). Sirve para dejar de usar este tablero, no para el día a día. Hace falta una API key de tu cuenta de Kaneo. Los títulos no tienen que coincidir: el vínculo queda guardado en cada tarea de Fliipa, así que volver a migrar actualiza en vez de duplicar.",
     steps: [
-      "Conectar con el workspace tablero-de-tareas.",
-      "Elegir el proyecto y pulsar Migrar / actualizar.",
-      "Lo vivo se actualiza. Lo que ya borraste en Fliipa se quita de Plane.",
-      "Si el responsable de Fliipa no se reconoce en Plane, la tarea igual llega, sin asignar.",
+      "Generar la API key en Kaneo (Configuración de cuenta → API Keys).",
+      "Pegarla en el modal y pulsar Conectar, luego Migrar a Kaneo.",
+      "Si el responsable de Fliipa no se reconoce en Kaneo, la tarea igual llega, sin asignar.",
     ],
   },
 ];
@@ -3656,6 +3656,7 @@ function InitiativeDetailDrawer({ C, initiative, assignees, onClose, onSave, onD
     history.push({ t: initiative.statusChangedAt, text: `Estado actualizado a ${col}` });
   }
   if (initiative.planeMigratedAt) history.push({ t: initiative.planeMigratedAt, text: "Migrada a Plane" });
+  if (initiative.kaneoMigratedAt) history.push({ t: initiative.kaneoMigratedAt, text: "Migrada a Kaneo" });
   (initiative.notesHistory || []).forEach((entry) => {
     history.push({
       t: entry.at,
@@ -4719,6 +4720,9 @@ function TaskCard({ C, task, dragging, selected, onDragStart, onDragEnd, onMoveL
           {task.planeWorkItemId && (
             <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", color: C.accent }}>PLANE</span>
           )}
+          {task.kaneoTaskId && (
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", color: C.accent }}>KANEO</span>
+          )}
         </div>
       </div>
     </div>
@@ -4949,6 +4953,7 @@ function TaskDetailModal({ C, task, assignees, initiatives, onClose, onSave, onD
     history.push({ t: task.statusChangedAt, text: `Estado actualizado a ${col}` });
   }
   if (task.planeMigratedAt) history.push({ t: task.planeMigratedAt, text: "Migrada a Plane" });
+  if (task.kaneoMigratedAt) history.push({ t: task.kaneoMigratedAt, text: "Migrada a Kaneo" });
   (task.notesHistory || []).forEach((entry) => {
     history.push({
       t: entry.at,
