@@ -74,19 +74,63 @@ async function parseKaneoResponse(res) {
   return data;
 }
 
-export async function kaneoRequest({ baseUrl, apiKey, path, method = "GET", body }) {
-  const base = normalizeBase(baseUrl);
+function localProxyUrl() {
+  if (typeof window === "undefined") return null;
   try {
-    const res = await fetch(`${base}/api${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    return await parseKaneoResponse(res);
+    const base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "/";
+    return new URL("api/kaneo", window.location.origin + (base.endsWith("/") ? base : `${base}/`)).toString();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function kaneoRequestViaProxy(proxyUrl, { baseUrl, apiKey, path, method, body }) {
+  const res = await fetch(proxyUrl, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ baseUrl: normalizeBase(baseUrl), apiKey, path, method, body }),
+  });
+  const type = (res.headers.get("content-type") || "").toLowerCase();
+  if (!type.includes("json")) {
+    const err = new Error("Este visor no tiene puente hacia Kaneo.");
+    err.status = res.status;
+    throw err;
+  }
+  return parseKaneoResponse(res);
+}
+
+async function kaneoRequestDirect({ baseUrl, apiKey, path, method, body }) {
+  const res = await fetch(`${normalizeBase(baseUrl)}/api${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return parseKaneoResponse(res);
+}
+
+// Igual que con Plane, el navegador no puede hablar directo con la mayoría de
+// instancias de Kaneo por CORS, así que primero se intenta por el proxy propio
+// de este tablero (api/kaneo.js, servidor a servidor) y solo si eso falla se
+// intenta un fetch directo (por si la instancia sí permite CORS).
+export async function kaneoRequest({ baseUrl, apiKey, path, method = "GET", body }) {
+  const proxy = localProxyUrl();
+  if (proxy) {
+    try {
+      return await kaneoRequestViaProxy(proxy, { baseUrl, apiKey, path, method, body });
+    } catch (e) {
+      // Si el proxy alcanzó a Kaneo y trae una respuesta JSON real (aunque sea un
+      // error), esa es la respuesta válida: no tiene sentido reintentar directo.
+      // Solo se reintenta directo cuando el proxy en sí falló (ruta no desplegada,
+      // red caída, respuesta que no es JSON).
+      if (e.data) throw e;
+    }
+  }
+  try {
+    return await kaneoRequestDirect({ baseUrl, apiKey, path, method, body });
   } catch (e) {
     if (e.name === "TypeError" || /Failed to fetch|NetworkError|CORS/i.test(e.message || "")) {
       const err = new Error(
