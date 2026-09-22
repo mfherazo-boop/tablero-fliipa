@@ -184,39 +184,25 @@ export async function listProjects(cfg) {
   }
 }
 
-// Las columnas/estados reales del proyecto. La API de Kaneo no documenta un único
-// endpoint estable para esto todavía, así que se intenta por varias rutas plausibles;
-// si ninguna responde, se usan directamente los nombres de columna de Fliipa como
-// texto de estado (funciona si Kaneo acepta cualquier texto, pero puede no “calzar”
-// visualmente con una columna existente si el proyecto espera un slug distinto).
+// Antes esta función intentaba ADIVINAR el estado real llamando a varias rutas
+// no confirmadas (/project/{id}/status, /project/{id}/statuses, /status/{id},
+// /project/{id}) y luego buscaba, dentro de lo que respondiera cada una, un
+// nombre parecido a la columna de Fliipa. El problema: si alguna de esas rutas
+// SÍ responde pero con datos que no son en realidad columnas (por ejemplo el
+// proyecto completo, o una lista de tareas), esa búsqueda difusa podía
+// "encontrar" una coincidencia falsa y mandar un slug de estado equivocado —
+// eso es lo más probable que causó que una tarea Bloqueada en Fliipa apareciera
+// en la columna QA dev de Kaneo en vez de Blocked.
+// Ya no hace falta adivinar: los slugs reales de este proyecto (to-do, blocked,
+// in-progress, in-review, qa-prod, done, qa-production, planned, archived) se
+// confirmaron con el propio error de validación de Kaneo en una migración real,
+// así que se usan siempre, directamente, sin intentar "descubrir" nada por rutas
+// no documentadas.
 export async function listProjectStatuses(cfg) {
-  const candidates = [
-    `/project/${cfg.projectId}/status`,
-    `/project/${cfg.projectId}/statuses`,
-    `/status/${cfg.projectId}`,
-    `/project/${cfg.projectId}`,
-  ];
-  for (const path of candidates) {
-    try {
-      const data = await kaneoRequest({ ...cfg, path });
-      const list = resultsOf(data.statuses || data.columns || data);
-      if (list.length) return list;
-    } catch (e) {
-      /* intenta la siguiente ruta */
-    }
-  }
   return [];
 }
 
-export function matchStatus(statuses, columnId) {
-  const hints = COLUMN_HINTS[columnId] || COLUMN_HINTS.backlog;
-  const list = statuses || [];
-  const found = list.find((s) => {
-    const name = String(s.name || s.label || s.title || "").toLowerCase();
-    return hints.some((h) => name.includes(h));
-  });
-  if (found) return found.slug || found.id || found.name;
-  // Sin lista de columnas reales: se manda el slug real conocido de Fliipa/Kaneo.
+export function matchStatus(columnId) {
   return FLIIPA_COLUMN_LABEL[columnId] || FLIIPA_COLUMN_LABEL.backlog;
 }
 
@@ -411,7 +397,6 @@ export async function migrateToKaneo({
   // descripción, para no llenar el tablero de Kaneo con tarjetas que no son tareas.
   const { liveTasks, liveInits } = liveMigrationItems({ tasks, initiatives, deletedItems: deletedRecords });
 
-  const statuses = await listProjectStatuses(cfg);
   let members = [];
   try {
     members = await listMembers(cfg);
@@ -429,7 +414,7 @@ export async function migrateToKaneo({
     const task = liveTasks[i];
     if (onProgress) onProgress({ current: i + 1, total: liveTasks.length, label: task.title || task.id });
     try {
-      const status = matchStatus(statuses, task.status);
+      const status = matchStatus(task.status);
       const priority = task.blocked ? "high" : "no-priority";
       let userId = null;
       if (task.assignee) {
