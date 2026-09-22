@@ -354,8 +354,30 @@ async function createTask(cfg, { title, description, priority, status, userId })
   return kaneoRequest({ ...cfg, method: "POST", path: `/task/${cfg.projectId}`, body });
 }
 
+async function getTask(cfg, taskId) {
+  return kaneoRequest({ ...cfg, method: "GET", path: `/task/${taskId}` });
+}
+
+// A diferencia de crear, PUT /task/{id} en Kaneo exige también `projectId` y
+// `position` en el cuerpo (si faltan, la API responde con un error de validación
+// tipo "projectId: Invalid input: expected string, received undefined"). Como acá
+// no se trae esa info de entrada, primero se lee la tarea actual en Kaneo para
+// reusar su projectId/position reales y no moverla de lugar ni cambiarla de
+// proyecto sin querer.
 async function updateTask(cfg, taskId, patch) {
-  return kaneoRequest({ ...cfg, method: "PUT", path: `/task/${taskId}`, body: patch });
+  let projectId = cfg.projectId;
+  let position = 0;
+  try {
+    const current = await getTask(cfg, taskId);
+    if (current) {
+      if (current.projectId) projectId = current.projectId;
+      if (typeof current.position === "number") position = current.position;
+    }
+  } catch (e) {
+    // Si no se puede leer la tarea actual (por ejemplo, se borró en Kaneo),
+    // se sigue con el proyecto configurado y posición 0 como respaldo.
+  }
+  return kaneoRequest({ ...cfg, method: "PUT", path: `/task/${taskId}`, body: { ...patch, projectId, position } });
 }
 
 function sleep(ms) {
