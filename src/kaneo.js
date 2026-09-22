@@ -14,31 +14,30 @@ import { foldName, cleanRepeatedName, aliasForName, resolvePersonNick, PERSON_AL
 
 export const KANEO_SOURCE = "fliipa-kanban";
 
-// Debe coincidir con los nombres reales de las columnas de tu proyecto en Kaneo
-// (Sumz / Fliipa): Backlog, Blocked, In progress, PR review, QA dev, QA Prod, Hecho.
-const COLUMN_HINTS = {
-  backlog: ["backlog", "pendiente", "to-do", "to do", "todo"],
-  blocked: ["blocked", "bloqueado"],
-  in_progress: ["in progress", "in development", "progreso", "doing"],
-  review: ["pr review", "review", "revisión", "revision", "in-review"],
-  dev_qa: ["qa dev", "dev qa"],
-  product_qa: ["qa prod", "product qa"],
-  done: ["hecho", "completado", "done", "cerrado"],
-};
-
-// Slugs reales del proyecto Fliipa en orbit.sumz.co (Kaneo los reveló tal cual
-// en el error de la primera migración real: "Valid statuses for this project:
-// to-do, blocked, in-progress, in-review, qa-prod, done, qa-production, planned,
-// archived"). Se usan de respaldo cuando no se logra leer la lista de columnas
-// en vivo. "QA dev" ↔ qa-production y "QA Prod" ↔ qa-prod es lo único no 100%
-// confirmado — si alguna tarea cae en la columna QA equivocada, se intercambian.
+// Slugs reales del proyecto Fliipa en orbit.sumz.co (los 9 valores válidos los
+// reveló el propio error de validación de Kaneo: "Valid statuses for this
+// project: to-do, blocked, in-progress, in-review, qa-prod, done,
+// qa-production, planned, archived"). Pero qué slug corresponde a qué COLUMNA
+// visible no se puede adivinar por el nombre — el proyecto reasigna esos
+// nombres de forma no obvia. Se confirmó migrando una tarea de prueba a cada
+// columna y viendo dónde caía de verdad en Kaneo:
+//   Fliipa "Blocked"   -> se migró con slug "blocked"       -> cayó en "QA dev"
+//   Fliipa "Dev QA"    -> se migró con slug "qa-production" -> cayó en "QA Prod"
+//   Fliipa "Product QA"-> se migró con slug "qa-prod"       -> cayó en "Blocked"
+// O sea, en este proyecto: blocked=QA dev, qa-prod=Blocked, qa-production=QA Prod.
+// El mapeo de abajo ya usa esos 3 valores intercambiados para que cada columna
+// de Fliipa llegue a su columna real correspondiente en Kaneo. backlog/to-do,
+// in_progress/in-progress y review/in-review sí se confirmaron correctos con
+// tareas reales (no de prueba). "done" -> "done" sigue sin confirmar (no hay
+// forma de probarlo sin marcar una tarea real como completada), pero es la
+// apuesta más razonable.
 const FLIIPA_COLUMN_LABEL = {
   backlog: "to-do",
-  blocked: "blocked",
+  blocked: "qa-prod",
   in_progress: "in-progress",
   review: "in-review",
-  dev_qa: "qa-production",
-  product_qa: "qa-prod",
+  dev_qa: "blocked",
+  product_qa: "qa-production",
   done: "done",
 };
 
