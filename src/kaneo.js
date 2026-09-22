@@ -122,7 +122,24 @@ async function kaneoRequestDirect({ baseUrl, apiKey, path, method, body }) {
 // instancias de Kaneo por CORS, así que primero se intenta por el proxy propio
 // de este tablero (api/kaneo.js, servidor a servidor) y solo si eso falla se
 // intenta un fetch directo (por si la instancia sí permite CORS).
+// El "Authorization: Bearer <key>" es un encabezado HTTP: solo puede llevar
+// caracteres ASCII imprimibles. Si al copiar la clave se coló un carácter raro
+// (una raya "—", una comilla curva, etc.) el fetch revienta con un error
+// críptico de "ByteString" que no dice nada de esto — mejor avisar de una vez.
+function assertHeaderSafeApiKey(apiKey) {
+  const key = String(apiKey || "");
+  if (!key) return;
+  if (!/^[\x20-\x7E]+$/.test(key)) {
+    const err = new Error(
+      "La API key tiene algún carácter que no es texto normal (puede haberse colado al copiarla, por ejemplo una raya \"—\" o una comilla curva). Vuelve a copiarla desde Kaneo y pégala de nuevo."
+    );
+    err.code = "KANEO_BAD_API_KEY";
+    throw err;
+  }
+}
+
 export async function kaneoRequest({ baseUrl, apiKey, path, method = "GET", body }) {
+  assertHeaderSafeApiKey(apiKey);
   const proxy = localProxyUrl();
   if (proxy) {
     try {
