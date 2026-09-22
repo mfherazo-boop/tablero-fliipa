@@ -274,7 +274,10 @@ export const PERSON_ALIASES = [
   { nick: "Mafe", patterns: ["mafe", "maria fernanda", "herazo"] },
   { nick: "Fran", patterns: ["fran", "francisco javier", "martinez vargas"] },
   { nick: "Alejo", patterns: ["alejo", "daniel alejandro", "aviles"] },
-  { nick: "Aleja", patterns: ["aleja", "alejandra"] },
+  // "Aleja" y "Ale Suárez" son la misma persona en Fliipa (asignada a veces
+  // con un nombre, a veces con el otro) y corresponden a "Ale Suárez" en
+  // Kaneo, así que ambas formas necesitan resolver al mismo alias.
+  { nick: "Aleja", patterns: ["aleja", "alejandra", "ale suarez"] },
   { nick: "William", patterns: ["william"] },
   { nick: "Ivan", patterns: ["oscar ivan", "briceno"] },
 ];

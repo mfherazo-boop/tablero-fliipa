@@ -143,6 +143,13 @@ assert(
   resolvePersonNick("Alejandro Bohorquez") === "Alejandro Bohorquez"
 );
 
+// "Aleja" y "Ale Suárez" son la misma persona en Fliipa (la asignan con uno u
+// otro nombre) y en Kaneo esa persona está como "Ale Suárez": ambas formas
+// deben resolver al mismo miembro.
+const membersConAleSuarez = [...members, { id: "m6", display_name: "Ale Suárez" }];
+assert("Aleja se relaciona con Ale Suárez", matchMember(membersConAleSuarez, "Aleja")?.id === "m6");
+assert("Ale Suárez se relaciona consigo misma", matchMember(membersConAleSuarez, "Ale Suárez")?.id === "m6");
+
 const audit = auditMigration({
   initiatives: [{ id: "i1", title: "DOCUMENTACIÓN" }],
   tasks: [
