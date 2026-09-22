@@ -373,8 +373,48 @@ async function updateTask(cfg, taskId, patch) {
   return kaneoRequest({ ...cfg, method: "PUT", path: `/task/${taskId}`, body });
 }
 
+async function deleteTask(cfg, taskId) {
+  return kaneoRequest({ ...cfg, method: "DELETE", path: `/task/${taskId}` });
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Limpieza de las tarjetas que quedaron en Kaneo de cuando las iniciativas de
+// Fliipa todavía se migraban como tarjetas propias (antes del fix que las quitó
+// de la migración normal). Solo toca iniciativas que tengan kaneoTaskId
+// guardado — nunca las tareas reales — y por cada una: borra esa tarjeta en
+// Kaneo y, si se borró bien, avisa via onItemCleaned para que Fliipa también
+// olvide el vínculo (si no se olvida, y esa tarjeta se recrea a mano en Kaneo
+// con otro id, no pasa nada raro porque ya no hay ninguna migración que vuelva
+// a tocar iniciativas).
+export async function cleanupMigratedInitiatives({ baseUrl, apiKey, workspaceId, projectId, initiatives, onProgress, onItemCleaned }) {
+  const cfg = { baseUrl, apiKey, workspaceId, projectId };
+  const targets = (initiatives || []).filter((ini) => ini && ini.kaneoTaskId);
+  const summary = { deleted: 0, failed: 0, errors: [] };
+  for (let i = 0; i < targets.length; i++) {
+    const ini = targets[i];
+    if (onProgress) onProgress({ current: i + 1, total: targets.length, label: ini.title || ini.id });
+    try {
+      await deleteTask(cfg, ini.kaneoTaskId);
+      summary.deleted += 1;
+      if (onItemCleaned) onItemCleaned({ id: ini.id });
+    } catch (e) {
+      // Si ya no existe en Kaneo (por ejemplo, la borraste tú a mano), lo
+      // contamos igual como resuelto: el objetivo es que Fliipa deje de
+      // recordar un vínculo hacia una tarjeta que ya no está.
+      if (e.status === 404) {
+        summary.deleted += 1;
+        if (onItemCleaned) onItemCleaned({ id: ini.id });
+      } else {
+        summary.failed += 1;
+        summary.errors.push(`${ini.title || ini.id}: ${e.message}`);
+      }
+    }
+    await sleep(200);
+  }
+  return summary;
 }
 
 export async function migrateToKaneo({

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { auditMigration, buildMigrationPackage, isKaneoBrowserBlocked, listProjects, migrateToKaneo } from "./kaneo";
+import { auditMigration, buildMigrationPackage, cleanupMigratedInitiatives, isKaneoBrowserBlocked, listProjects, migrateToKaneo } from "./kaneo";
 
 const SETTINGS_KEY = "fliipa-kanban:kaneo-settings";
 
@@ -43,7 +43,7 @@ function downloadJson(filename, data) {
   downloadBlob(filename, new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
 }
 
-export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems, onClose, onItemMigrated, onBackup }) {
+export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems, onClose, onItemMigrated, onInitiativeCleaned, onBackup }) {
   const saved = useMemo(loadSettings, []);
   const [baseUrl, setBaseUrl] = useState(saved.baseUrl || KNOWN_DEFAULTS.baseUrl);
   const [apiKey, setApiKey] = useState("");
@@ -56,8 +56,14 @@ export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems,
   const [summary, setSummary] = useState(null);
   const [browserBlocked, setBrowserBlocked] = useState(false);
 
+  const [cleanupStatus, setCleanupStatus] = useState("idle");
+  const [cleanupMessage, setCleanupMessage] = useState("");
+  const [cleanupProgress, setCleanupProgress] = useState(null);
+  const [cleanupSummary, setCleanupSummary] = useState(null);
+
   const totalItems = (tasks || []).length;
   const already = (tasks || []).filter((t) => t.kaneoTaskId).length;
+  const migratedInitiatives = (initiatives || []).filter((ini) => ini && ini.kaneoTaskId);
   const audit = useMemo(() => auditMigration({ tasks, initiatives, deletedItems }), [tasks, initiatives, deletedItems]);
 
   const label = { display: "block", fontSize: 12, color: C.textMuted, marginTop: 12, marginBottom: 5 };
@@ -187,6 +193,45 @@ export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems,
     downloadJson(`fliipa-para-kaneo-${new Date().toISOString().slice(0, 10)}.json`, buildMigrationPackage({ tasks, initiatives }));
   }
 
+  async function handleCleanupInitiatives() {
+    if (!migratedInitiatives.length) return;
+    if (!canConnect) {
+      setCleanupStatus("error");
+      setCleanupMessage("Conecta primero (URL, proyecto y API key) para poder borrar en Kaneo.");
+      return;
+    }
+    const ok = window.confirm(
+      `Esto borra en Kaneo ${migratedInitiatives.length} tarjeta${migratedInitiatives.length === 1 ? "" : "s"} que quedaron ahí de cuando las iniciativas se migraban por error (no toca tareas reales, ni nada en Fliipa). ¿Seguro?`
+    );
+    if (!ok) return;
+    setCleanupStatus("running");
+    setCleanupMessage("");
+    setCleanupSummary(null);
+    try {
+      const result = await cleanupMigratedInitiatives({
+        baseUrl,
+        apiKey: apiKey.trim(),
+        workspaceId: workspaceId.trim(),
+        projectId: projectId.trim(),
+        initiatives,
+        onProgress: setCleanupProgress,
+        onItemCleaned: onInitiativeCleaned,
+      });
+      setCleanupSummary(result);
+      setCleanupProgress(null);
+      setCleanupStatus("done");
+      setCleanupMessage(
+        result.failed
+          ? "Se borraron algunas, otras fallaron (detalle abajo)."
+          : `Listo, se borraron ${result.deleted} tarjeta${result.deleted === 1 ? "" : "s"} de iniciativas en Kaneo.`
+      );
+    } catch (e) {
+      setCleanupStatus("error");
+      setCleanupProgress(null);
+      setCleanupMessage(e.message || "No se pudo limpiar.");
+    }
+  }
+
   return (
     <div
       onClick={onClose}
@@ -246,6 +291,55 @@ export default function KaneoMigrateModal({ C, tasks, initiatives, deletedItems,
             <div>{audit.withoutInitiative.length} tarea{audit.withoutInitiative.length === 1 ? "" : "s"} sin iniciativa: van sueltas en Kaneo.</div>
           )}
         </div>
+
+        {migratedInitiatives.length > 0 && (
+          <div
+            style={{
+              background: C.surfaceRaised,
+              border: `1px solid ${C.borderSoft}`,
+              borderRadius: 10,
+              padding: "12px 14px",
+              marginBottom: 12,
+              fontSize: 13,
+              color: C.textMuted,
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.textFaint, marginBottom: 8 }}>
+              Tarjetas de iniciativas para limpiar
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              {migratedInitiatives.length} iniciativa{migratedInitiatives.length === 1 ? "" : "s"} de Fliipa quedaron con su propia tarjeta en Kaneo de
+              cuando la migración todavía las incluía por error. Ya no se van a volver a crear, pero las que ya existen
+              hay que borrarlas a mano o con este botón (conecta primero arriba).
+            </div>
+            <button
+              onClick={handleCleanupInitiatives}
+              style={ghost}
+              disabled={cleanupStatus === "running" || !canConnect}
+              title={!canConnect ? "Conecta primero con tu API key" : ""}
+            >
+              {cleanupStatus === "running" ? "Borrando…" : `Borrar ${migratedInitiatives.length} tarjeta${migratedInitiatives.length === 1 ? "" : "s"} de iniciativas`}
+            </button>
+            {cleanupProgress && (
+              <div style={{ fontSize: 12.5, color: C.textMuted, marginTop: 10 }}>
+                Borrando {cleanupProgress.current} de {cleanupProgress.total}: {cleanupProgress.label}
+              </div>
+            )}
+            {cleanupMessage && (
+              <div style={{ fontSize: 13, color: cleanupStatus === "error" ? C.danger : C.textMuted, marginTop: 10, lineHeight: 1.45 }}>
+                {cleanupMessage}
+              </div>
+            )}
+            {cleanupSummary && cleanupSummary.errors.length > 0 && (
+              <div style={{ marginTop: 8, color: C.danger, fontSize: 12.5 }}>
+                {cleanupSummary.errors.slice(0, 5).map((err) => (
+                  <div key={err}>{err}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div
           style={{

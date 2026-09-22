@@ -2438,6 +2438,7 @@ export default function KanbanBoard() {
           ]}
           onClose={() => setKaneoOpen(false)}
           onItemMigrated={markKaneoItem}
+          onInitiativeCleaned={({ id }) => updateInitiative(id, { kaneoTaskId: null, kaneoMigratedAt: null })}
           onBackup={() => {
             const payload = {
               savedAt: Date.now(),
