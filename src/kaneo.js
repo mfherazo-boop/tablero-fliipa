@@ -377,7 +377,15 @@ async function updateTask(cfg, taskId, patch) {
     // Si no se puede leer la tarea actual (por ejemplo, se borró en Kaneo),
     // se sigue con el proyecto configurado y posición 0 como respaldo.
   }
-  return kaneoRequest({ ...cfg, method: "PUT", path: `/task/${taskId}`, body: { ...patch, projectId, position } });
+  // userId es un campo opcional para Kaneo, pero opcional no es lo mismo que
+  // null: si no se reconoció al responsable en Fliipa, matchMember devuelve
+  // null y eso llega aquí como `userId: null`, que la API rechaza con
+  // "userId: Invalid input: expected string, received null". Si no hay un id
+  // real, mejor no mandar el campo (deja el responsable como esté en Kaneo)
+  // en vez de mandar null.
+  const body = { ...patch, projectId, position };
+  if (!body.userId) delete body.userId;
+  return kaneoRequest({ ...cfg, method: "PUT", path: `/task/${taskId}`, body });
 }
 
 function sleep(ms) {
