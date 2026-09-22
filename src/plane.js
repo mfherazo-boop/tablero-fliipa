@@ -257,6 +257,19 @@ export function foldName(value) {
     .toLowerCase();
 }
 
+// Coincidencia de subcadena "de palabra completa": un patr\u00f3n como "aleja" no
+// debe emparejar con "alejandro" solo porque "alejandro" empieza con esas
+// letras. Antes us\u00e1bamos `haystack.includes(pattern)`, que s\u00ed hac\u00eda ese match
+// falso y terminaba mezclando "Alejandro Bohorquez" con el alias "Aleja" (y,
+// en cadena, con el miembro "Daniel Alejandro Avil\u00e9s"). Aqu\u00ed exigimos que el
+// patr\u00f3n (que puede ser una o varias palabras) aparezca delimitado por inicio
+// de cadena / espacio en ambos extremos.
+export function containsWholeWord(haystack, needle) {
+  if (!haystack || !needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\s)${escaped}(\\s|$)`).test(haystack);
+}
+
 export const PERSON_ALIASES = [
   { nick: "Mafe", patterns: ["mafe", "maria fernanda", "herazo"] },
   { nick: "Fran", patterns: ["fran", "francisco javier", "martinez vargas"] },
@@ -293,7 +306,7 @@ export function aliasForName(name) {
   if (!needle) return null;
   return (
     PERSON_ALIASES.find((a) => foldName(a.nick) === needle) ||
-    PERSON_ALIASES.find((a) => a.patterns.some((p) => needle.includes(p))) ||
+    PERSON_ALIASES.find((a) => a.patterns.some((p) => containsWholeWord(needle, p))) ||
     null
   );
 }
@@ -329,7 +342,7 @@ function memberMatchesAlias(member, alias) {
   const hay = foldName(memberName(member));
   const email = foldName(member?.email || member?.member?.email || "");
   const blob = `${hay} ${email}`;
-  return alias.patterns.some((p) => blob.includes(p));
+  return alias.patterns.some((p) => containsWholeWord(blob, p));
 }
 
 export function matchMember(members, name) {

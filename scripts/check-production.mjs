@@ -130,6 +130,19 @@ assert("si el nombre no está en Plane, no asigna (la tarea igual migra)", match
 assert("apodo desde nombre duplicado", resolvePersonNick("Francisco Javier Martínez Vargas Martínez Vargas") === "Fran");
 assert("Daniel Alejandro es Alejo", resolvePersonNick("Daniel Alejandro Avilés  Avilés Montaña") === "Alejo");
 
+// Regresión: "Alejandro Bohorquez" no debe caer en el alias "Aleja" solo
+// porque "alejandro" empieza con esas letras (bug real: todas sus tareas
+// terminaban asignadas a "Daniel Alejandro Avilés" en Kaneo).
+const membersConAviles = [...members, { id: "m5", display_name: "Daniel Alejandro Avilés" }];
+assert(
+  "Alejandro Bohorquez no se confunde con Alejo Avilés",
+  matchMember(membersConAviles, "Alejandro Bohorquez") == null
+);
+assert(
+  "apodo de Alejandro Bohorquez no es Alejo",
+  resolvePersonNick("Alejandro Bohorquez") === "Alejandro Bohorquez"
+);
+
 const audit = auditMigration({
   initiatives: [{ id: "i1", title: "DOCUMENTACIÓN" }],
   tasks: [

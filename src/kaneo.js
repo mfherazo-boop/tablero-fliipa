@@ -10,7 +10,7 @@
 // Si algo no calza exactamente con tu instancia (orbit.sumz.co, v2.25.0), el error que
 // tire la llamada real es la mejor pista para ajustar la ruta o el payload.
 
-import { foldName, cleanRepeatedName, aliasForName, resolvePersonNick, PERSON_ALIASES } from "./plane";
+import { foldName, cleanRepeatedName, aliasForName, resolvePersonNick, PERSON_ALIASES, containsWholeWord } from "./plane";
 
 export const KANEO_SOURCE = "fliipa-kanban";
 
@@ -238,7 +238,7 @@ function memberId(member) {
 
 function memberMatchesAlias(member, alias) {
   const blob = foldName(`${memberName(member)} ${member?.email || member?.user?.email || ""}`);
-  return alias.patterns.some((p) => blob.includes(p));
+  return alias.patterns.some((p) => containsWholeWord(blob, p));
 }
 
 function memberMatchesName(member, needle) {
@@ -264,7 +264,17 @@ export function matchMember(members, name) {
 
 function buildTaskDescription(task, initiative) {
   const lines = [];
-  if (task.notes) lines.push(task.notes);
+  // El contenido real de la tarea en Fliipa vive en `description` (el texto
+  // largo que se escribe al crear/editar la tarea, con contexto, requerimiento,
+  // etc.) — `notes` es un campo aparte y más corto (comentarios sueltos,
+  // anotaciones de import). Antes solo se mandaba `notes`, así que una tarea
+  // con una descripción real (como "Conexión Druo") llegaba a Kaneo sin ese
+  // contenido, solo con las líneas de metadata de abajo.
+  if (task.description) lines.push(task.description);
+  if (task.notes) {
+    if (lines.length) lines.push("");
+    lines.push(task.notes);
+  }
   const extras = [];
   if (initiative && initiative.title) extras.push(`Iniciativa: ${initiative.title}`);
   if (task.type) extras.push(`Tipo en Fliipa: ${task.type}`);
