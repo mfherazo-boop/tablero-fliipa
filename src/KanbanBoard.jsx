@@ -1598,13 +1598,18 @@ export default function KanbanBoard() {
         .fliipa-col {
           flex: 1 1 0 !important;
           min-width: 210px !important;
+          max-height: calc(100vh - 300px);
+          overflow-y: auto;
         }
+        .fliipa-col::-webkit-scrollbar { width: 8px; }
+        .fliipa-col::-webkit-scrollbar-thumb { background: rgba(150, 160, 180, 0.35); border-radius: 4px; }
         .fliipa-board-focus {
           overflow-x: hidden !important;
           height: 100%;
         }
         .fliipa-board-focus .fliipa-col {
           min-width: 0 !important;
+          max-height: none;
           overflow-y: auto;
         }
         .fliipa-init-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
