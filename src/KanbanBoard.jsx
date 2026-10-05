@@ -2172,6 +2172,64 @@ export default function KanbanBoard() {
 
             {/* Tablero */}
             <div className={`fliipa-board${boardFocusMode ? " fliipa-board-focus" : ""}`}>
+              <div
+                className="fliipa-col"
+                style={{
+                  flex: "1 1 0",
+                  minWidth: 210,
+                  background: C.surface,
+                  border: `1px solid ${C.danger}`,
+                  borderRadius: 14,
+                  padding: 12,
+                  minHeight: 420,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 14px" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.danger, display: "inline-block" }} />
+                    Vencidas
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: overdueTasks.length ? C.danger : C.textFaint,
+                      background: C.surfaceRaised,
+                      borderRadius: 20,
+                      padding: "1px 8px",
+                    }}
+                  >
+                    {overdueTasks.length}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {overdueTasks.map((task) => {
+                    const statusIdx = COLUMNS.findIndex((c) => c.id === task.status);
+                    return (
+                      <TaskCard
+                        key={task.id}
+                        C={C}
+                        task={task}
+                        selected={openTaskId === task.id}
+                        dragging={draggingId === task.id}
+                        onDragStart={() => setDraggingId(task.id)}
+                        onDragEnd={() => setDraggingId(null)}
+                        onMoveLeft={statusIdx > 0 ? () => moveByOffset(task.id, -1) : null}
+                        onMoveRight={statusIdx >= 0 && statusIdx < COLUMNS.length - 1 ? () => moveByOffset(task.id, 1) : null}
+                        onDelete={() => deleteTask(task.id)}
+                        onToggleBlocked={() => toggleBlocked(task.id)}
+                        onChangeStatus={(status) => moveTask(task.id, status)}
+                        onOpen={() => setOpenTaskId(task.id)}
+                        initiative={initiatives.find((i) => idsMatch(i.id, task.initiativeId)) || null}
+                      />
+                    );
+                  })}
+                  {overdueTasks.length === 0 && (
+                    <div style={{ fontSize: 12.5, color: C.textFaint, padding: "10px 4px", textAlign: "center" }}>
+                      Sin tareas vencidas
+                    </div>
+                  )}
+                </div>
+              </div>
               {BOARD_COLUMNS.map((col, colIdx) => (
                 <div
                   className="fliipa-col"
@@ -2878,6 +2936,7 @@ const INFO_TOPICS = [
       "PR review: el código está en revisión (pull request).",
       "Dev QA: desarrollo prueba que el cambio funciona.",
       "Product QA: producto valida que quedó como se esperaba.",
+      "Vencidas: fecha pasada, o sin actualizar desde el mes pasado, y todavía no está en Completado.",
       "Completado: terminada. Sale del tablero y queda en la pestaña Completado.",
     ],
   },
