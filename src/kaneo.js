@@ -108,15 +108,24 @@ function kaneoProxyUrls() {
 }
 
 async function kaneoRequestViaProxy(proxyUrl, { baseUrl, apiKey, path, method, body }) {
-  const res = await fetch(proxyUrl, {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ service: "kaneo", baseUrl: normalizeBase(baseUrl), apiKey, path, method, body }),
-  });
+  let res;
+  try {
+    res = await fetch(proxyUrl, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ service: "kaneo", baseUrl: normalizeBase(baseUrl), apiKey, path, method, body }),
+    });
+  } catch (e) {
+    const err = new Error("No se alcanzó el puente de Kaneo. Recarga la página con Ctrl+F5 e inténtalo otra vez.");
+    err.code = "KANEO_PROXY_UNREACHABLE";
+    err.cause = e;
+    throw err;
+  }
   const type = (res.headers.get("content-type") || "").toLowerCase();
   if (!type.includes("json")) {
-    const err = new Error("Este visor no tiene puente hacia Kaneo.");
+    const err = new Error("El puente de Kaneo no respondió en JSON. Recarga la página con Ctrl+F5.");
     err.status = res.status;
+    err.data = { error: err.message };
     throw err;
   }
   return parseKaneoResponse(res);
@@ -158,19 +167,19 @@ function assertHeaderSafeApiKey(apiKey) {
 export async function kaneoRequest({ baseUrl, apiKey, path, method = "GET", body }) {
   assertHeaderSafeApiKey(apiKey);
   let lastErr = null;
-  for (const proxy of kaneoProxyUrls()) {
+  const proxies = kaneoProxyUrls();
+  for (const proxy of proxies) {
     try {
       return await kaneoRequestViaProxy(proxy, { baseUrl, apiKey, path, method, body });
     } catch (e) {
       lastErr = e;
-      // Si el proxy alcanzó a Kaneo y trae una respuesta JSON real (aunque sea un
-      // error), esa es la respuesta válida: no tiene sentido reintentar directo.
-      // Solo se reintenta cuando el proxy en sí falló (ruta no desplegada,
-      // red caída, respuesta que no es JSON).
-      if (e.data) throw e;
+      // Si el proxy alcanzó a Kaneo, o ni siquiera se pudo abrir, esa es la
+      // respuesta que hay que mostrar. Llamar directo desde el navegador solo
+      // tapa el fallo con un error de CORS.
+      if (e.data || e.code === "KANEO_PROXY_UNREACHABLE") throw e;
     }
   }
-  if (lastErr && lastErr.data) throw lastErr;
+  if (proxies.length && lastErr) throw lastErr;
   try {
     return await kaneoRequestDirect({ baseUrl, apiKey, path, method, body });
   } catch (e) {
