@@ -27,10 +27,68 @@ function normalizeBase(url) {
 function isAllowedPlaneBase(url) {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:" && /(^|\.)plane\.so$/i.test(parsed.hostname);
+    return parsed.protocol === "https:" && /(^|\.)plane\.so$/i.test(parsed.hostname) && !parsed.username;
   } catch (e) {
     return false;
   }
+}
+
+export function normalizeKaneoBase(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
+
+export function isAllowedKaneoBase(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "orbit.sumz.co" && !parsed.username && !parsed.password && !parsed.port;
+  } catch (e) {
+    return false;
+  }
+}
+
+export function isSafeApiPath(path) {
+  const value = String(path || "");
+  if (!value.startsWith("/") || value.startsWith("//")) return false;
+  if (value.includes("\\") || value.includes("://") || value.includes("..")) return false;
+  return value.length <= 2000;
+}
+
+async function proxyKaneo(incoming) {
+  const apiKey = String(incoming.apiKey || "").trim();
+  const path = String(incoming.path || "");
+  const method = String(incoming.method || "GET").toUpperCase();
+  const baseUrl = normalizeKaneoBase(incoming.baseUrl);
+  if (!apiKey || !isSafeApiPath(path)) {
+    return json(400, { error: "Faltan apiKey o path" });
+  }
+  if (!["GET", "POST", "PATCH", "PUT", "DELETE"].includes(method)) {
+    return json(400, { error: "Método de Kaneo no permitido" });
+  }
+  if (!isAllowedKaneoBase(baseUrl)) {
+    return json(400, { error: "URL de Kaneo no permitida" });
+  }
+  const target = `${baseUrl}/api${path}`;
+  const proxied = await fetch(target, {
+    method,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+      ...(incoming.body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: incoming.body ? JSON.stringify(incoming.body) : undefined,
+  });
+  if (proxied.status === 204 || proxied.status === 205) {
+    return json(200, { ok: true });
+  }
+  const text = await proxied.text();
+  return new Response(text || "{}", {
+    status: proxied.status,
+    headers: {
+      ...corsHeaders(),
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 export default {
@@ -44,6 +102,13 @@ export default {
 
     try {
       const incoming = await request.json();
+      if (incoming && incoming.service === "kaneo") {
+        try {
+          return await proxyKaneo(incoming);
+        } catch (e) {
+          return json(502, { error: e.message || "No se pudo hablar con Kaneo" });
+        }
+      }
       const apiKey = String(incoming.apiKey || "").trim();
       const path = String(incoming.path || "");
       const method = String(incoming.method || "GET").toUpperCase();

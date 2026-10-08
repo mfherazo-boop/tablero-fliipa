@@ -89,11 +89,29 @@ function localProxyUrl() {
   }
 }
 
+function isGithubPages() {
+  return typeof window !== "undefined" && /\.github\.io$/i.test(window.location.hostname);
+}
+
+const HOSTED_KANEO_PROXY = "https://tablero-fliipa-plane.excited-marshmallow.workers.dev";
+
+function kaneoProxyUrls() {
+  const urls = [];
+  if (!isGithubPages()) {
+    const local = localProxyUrl();
+    if (local) urls.push(local);
+  }
+  const hosted =
+    (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_KANEO_PROXY) || HOSTED_KANEO_PROXY;
+  if (hosted && !urls.includes(hosted)) urls.push(hosted);
+  return urls;
+}
+
 async function kaneoRequestViaProxy(proxyUrl, { baseUrl, apiKey, path, method, body }) {
   const res = await fetch(proxyUrl, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ baseUrl: normalizeBase(baseUrl), apiKey, path, method, body }),
+    body: JSON.stringify({ service: "kaneo", baseUrl: normalizeBase(baseUrl), apiKey, path, method, body }),
   });
   const type = (res.headers.get("content-type") || "").toLowerCase();
   if (!type.includes("json")) {
@@ -139,18 +157,20 @@ function assertHeaderSafeApiKey(apiKey) {
 
 export async function kaneoRequest({ baseUrl, apiKey, path, method = "GET", body }) {
   assertHeaderSafeApiKey(apiKey);
-  const proxy = localProxyUrl();
-  if (proxy) {
+  let lastErr = null;
+  for (const proxy of kaneoProxyUrls()) {
     try {
       return await kaneoRequestViaProxy(proxy, { baseUrl, apiKey, path, method, body });
     } catch (e) {
+      lastErr = e;
       // Si el proxy alcanzó a Kaneo y trae una respuesta JSON real (aunque sea un
       // error), esa es la respuesta válida: no tiene sentido reintentar directo.
-      // Solo se reintenta directo cuando el proxy en sí falló (ruta no desplegada,
+      // Solo se reintenta cuando el proxy en sí falló (ruta no desplegada,
       // red caída, respuesta que no es JSON).
       if (e.data) throw e;
     }
   }
+  if (lastErr && lastErr.data) throw lastErr;
   try {
     return await kaneoRequestDirect({ baseUrl, apiKey, path, method, body });
   } catch (e) {
@@ -176,11 +196,7 @@ function resultsOf(data) {
 // La lista de proyectos de un workspace: se usa para dejarte elegir el proyecto
 // destino igual que en la migración de Plane.
 export async function listProjects(cfg) {
-  try {
-    return resultsOf(await kaneoRequest({ ...cfg, path: `/project?workspaceId=${encodeURIComponent(cfg.workspaceId)}` }));
-  } catch (e) {
-    return [];
-  }
+  return resultsOf(await kaneoRequest({ ...cfg, path: `/project?workspaceId=${encodeURIComponent(cfg.workspaceId)}` }));
 }
 
 // Antes esta función intentaba ADIVINAR el estado real llamando a varias rutas

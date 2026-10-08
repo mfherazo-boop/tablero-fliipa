@@ -1,3 +1,4 @@
 name = "tablero-fliipa-plane"
 main = "workers/plane-proxy.js"
 compatibility_date = "2026-09-09"
+account_id = "ebee3ccf8280ffc0909eda5fea534f25"

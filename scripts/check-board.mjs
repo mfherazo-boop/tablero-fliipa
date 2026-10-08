@@ -131,6 +131,14 @@ const afterBody = JSON.parse(after.body);
 assert("después de guardar el GET sigue sin el adjunto", after.statusCode === 200 && afterBody["file:abc"] == null);
 assert("después de guardar el GET trae la tarea nueva", afterBody["fliipa-kanban:tasks"].includes("Actualizada"));
 
+const { isAllowedKaneoBase, isSafeApiPath, normalizeKaneoBase } = await import("../workers/plane-proxy.js");
+assert("Kaneo solo acepta orbit.sumz.co", isAllowedKaneoBase("https://orbit.sumz.co"));
+assert("Kaneo rechaza otro host", !isAllowedKaneoBase("https://evil.example"));
+assert("Kaneo rechaza credenciales en la URL", !isAllowedKaneoBase("https://user:pass@orbit.sumz.co"));
+assert("una ruta de tarea es válida", isSafeApiPath("/task/abc"));
+assert("una ruta con salto de host no es válida", !isSafeApiPath("//evil.example"));
+assert("la URL de Kaneo pierde la barra final", normalizeKaneoBase("https://orbit.sumz.co/") === "https://orbit.sumz.co");
+
 if (failed) {
   console.error(`\n${failed} prueba(s) del tablero fallaron`);
   process.exit(1);
