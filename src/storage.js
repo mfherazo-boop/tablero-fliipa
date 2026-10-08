@@ -8,6 +8,28 @@ let cache = {};
 let writeQueue = Promise.resolve();
 let mode = null; // "api" | "shared" | "local"
 const fileCache = {};
+let boardEtag = "";
+let fetchedAt = 0;
+let cacheStamp = 0;
+let inflight = null;
+// Una lectura del tablero alimenta las 6 claves que pide cada sincronización.
+const BOARD_FRESH_MS = 1200;
+
+function withoutFiles(data) {
+  const out = {};
+  if (!data || typeof data !== "object" || Array.isArray(data)) return out;
+  for (const key of Object.keys(data)) {
+    if (key.startsWith("file:")) continue;
+    out[key] = data[key];
+  }
+  return out;
+}
+
+function invalidateBoardCache() {
+  cacheStamp += 1;
+  boardEtag = "";
+  fetchedAt = 0;
+}
 
 function shouldUseLocalFallback() {
   if (typeof window === "undefined") return false;
@@ -28,7 +50,7 @@ function readLocalSnapshot() {
 
 function saveLocalSnapshot(data) {
   try {
-    localStorage.setItem("fliipa-kanban:cache", JSON.stringify(data || {}));
+    localStorage.setItem("fliipa-kanban:cache", JSON.stringify(withoutFiles(data)));
   } catch (e) {
     /* ignore quota */
   }
@@ -47,9 +69,14 @@ function parsePointer(raw) {
 
 async function probeApi() {
   try {
-    const res = await fetch(API, { headers: { Accept: "application/json" } });
+    const res = await fetch(`${API}?probe=1`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
     const type = (res.headers.get("content-type") || "").toLowerCase();
-    return res.ok && type.includes("application/json");
+    if (!res.ok || !type.includes("application/json")) return false;
+    const data = await res.json();
+    return !!data && typeof data === "object" && !Array.isArray(data);
   } catch (e) {
     return false;
   }
@@ -87,48 +114,96 @@ async function writeBox(data) {
   return out.id;
 }
 
+let modePromise = null;
+
 async function ensureMode() {
   if (mode) return mode;
-  if (await probeApi()) {
-    mode = "api";
-    return mode;
+  if (!modePromise) {
+    modePromise = (async () => {
+      if (await probeApi()) mode = "api";
+      else mode = "shared";
+      return mode;
+    })().catch((error) => {
+      modePromise = null;
+      throw error;
+    });
   }
-  mode = "shared";
-  return mode;
+  return modePromise;
 }
 
-async function fetchBoard() {
-  await ensureMode();
+async function fetchBoardFromApi() {
+  const stamp = cacheStamp;
+  const headers = { Accept: "application/json" };
+  if (boardEtag) headers["If-None-Match"] = boardEtag;
+  const res = await fetch(API, { headers, cache: "no-store" });
+  if (stamp !== cacheStamp) return cache;
+  if (res.status === 304) {
+    fetchedAt = Date.now();
+    return cache;
+  }
+  if (!res.ok) throw new Error("No se pudo leer el tablero compartido");
+  const nextEtag = res.headers.get("etag");
+  if (nextEtag) boardEtag = nextEtag;
+  const data = await res.json();
+  if (stamp !== cacheStamp) return cache;
+  cache = data && typeof data === "object" ? data : {};
+  fetchedAt = Date.now();
+  saveLocalSnapshot(cache);
+  return cache;
+}
+
+async function loadBoard() {
+  const stamp = cacheStamp;
   try {
-    if (mode === "api") {
-      const res = await fetch(API, { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error("No se pudo leer el tablero compartido");
-      const data = await res.json();
-      cache = data && typeof data === "object" ? data : {};
-    } else {
-      const id = await readPointer();
-      cache = id ? await readBox(id) : {};
-    }
+    if (mode === "api") return await fetchBoardFromApi();
+    const id = await readPointer();
+    const data = id ? await readBox(id) : {};
+    if (stamp !== cacheStamp) return cache;
+    cache = data;
+    fetchedAt = Date.now();
+    saveLocalSnapshot(cache);
+    return cache;
   } catch (e) {
     if (shouldUseLocalFallback()) {
+      if (stamp !== cacheStamp) return cache;
       cache = readLocalSnapshot();
       mode = "local";
+      fetchedAt = Date.now();
       return cache;
     }
     throw e;
   }
-  saveLocalSnapshot(cache);
-  return cache;
+}
+
+async function fetchBoard() {
+  await ensureMode();
+  if (mode === "local") return cache;
+  if (inflight) return inflight;
+  if (Date.now() - fetchedAt < BOARD_FRESH_MS) return cache;
+  inflight = loadBoard().finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
+
+function fileFromResponse(data, id) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const nested = data[`file:${id}`];
+  if (nested && typeof nested === "object" && nested.data) return nested;
+  if (data.data && (data.name || data.type)) return data;
+  return null;
 }
 
 async function putBoard(data) {
   await ensureMode();
   try {
     if (mode === "api") {
+      invalidateBoardCache();
       const res = await fetch(API, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(data),
+        cache: "no-store",
       });
       if (!res.ok) throw new Error("No se pudo guardar el tablero compartido");
     } else if (mode !== "local") {
@@ -145,6 +220,8 @@ async function putBoard(data) {
     throw e;
   }
   cache = data;
+  fetchedAt = Date.now();
+  cacheStamp += 1;
   saveLocalSnapshot(cache);
   return true;
 }
@@ -160,6 +237,7 @@ async function putFile(payload) {
       } catch (e) {
         all = { ...cache };
       }
+      all = withoutFiles(all);
       all[`file:${id}`] = payload;
       all._updatedAt = Date.now();
       return putBoard(all);
@@ -177,9 +255,32 @@ async function getFile(id) {
   if (!id) return null;
   if (fileCache[id]) return fileCache[id];
   await ensureMode();
-  const payload = mode === "api" ? (await fetchBoard())[`file:${id}`] || null : await readBox(id);
-  if (payload) fileCache[id] = payload;
-  return payload;
+  if (mode !== "api") {
+    const payload = await readBox(id);
+    if (payload) fileCache[id] = payload;
+    return payload;
+  }
+  try {
+    const res = await fetch(`${API}?file=${encodeURIComponent(id)}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const type = (res.headers.get("content-type") || "").toLowerCase();
+      if (type.includes("application/json")) {
+        const payload = fileFromResponse(await res.json(), id);
+        if (payload) {
+          fileCache[id] = payload;
+          return payload;
+        }
+      }
+    }
+  } catch (e) {
+    /* el tablero local antiguo mete el adjunto dentro del JSON completo */
+  }
+  const fromBoard = (await fetchBoard())[`file:${id}`] || null;
+  if (fromBoard) fileCache[id] = fromBoard;
+  return fromBoard;
 }
 
 export function installStorage() {
@@ -211,9 +312,9 @@ export function installStorage() {
       writeQueue = writeQueue.then(async () => {
         let all = {};
         try {
-          all = await fetchBoard();
+          all = withoutFiles(await fetchBoard());
         } catch (e) {
-          all = { ...readLocalSnapshot(), ...cache };
+          all = withoutFiles({ ...readLocalSnapshot(), ...cache });
         }
         all[key] = value;
         all._updatedAt = Date.now();

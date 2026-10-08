@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "node scripts/check-production.mjs"
+    "check": "node scripts/check-production.mjs && node scripts/check-board.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

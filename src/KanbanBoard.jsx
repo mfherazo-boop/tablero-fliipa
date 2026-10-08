@@ -823,6 +823,7 @@ export default function KanbanBoard() {
 
     async function applyRemote() {
       if (!hasStorage || applyingRemote.current) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         const remote = await pullSharedBoard(false);
         applyingRemote.current = true;
@@ -866,7 +867,10 @@ export default function KanbanBoard() {
       }
     }
 
-    const poll = setInterval(applyRemote, POLL_MS);
+    const poll = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      applyRemote();
+    }, POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") applyRemote();
     };
